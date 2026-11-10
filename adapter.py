@@ -705,3 +705,5 @@ def register(ctx) -> None:
     tools = confirm_tools()
     if tools and hasattr(ctx, "register_hook"):
         ctx.register_hook("pre_tool_call", make_confirm_hook(tools))
+    from . import cli
+    cli.register(ctx)  # `hermes lens setup` / `hermes lens try`

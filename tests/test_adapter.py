@@ -478,3 +478,29 @@ def test_the_plugins_own_state_survives_the_base_adapter_lifecycle(server):
                  "_hits", "_verified", "_turn_messages", "_asks"):
         assert isinstance(getattr(adapter, name), dict), name
     assert isinstance(adapter._tasks, set)
+
+
+def test_hermes_lens_try_works_against_the_real_server_over_http(server, monkeypatch):
+    """`hermes lens try` end to end: real HTTP into the plugin's own app, the card, the tap."""
+    from hermes_lens import cli
+    adapter, fake, app = server
+    monkeypatch.setattr(cli, "_env", lambda name, default="": TOKEN if name == "HERMES_LENS_TOKEN" else default)
+    monkeypatch.setattr(lens, "register", lambda ctx: None)
+
+    async def scenario():
+        async with TestServer(app) as srv:
+            base = f"http://127.0.0.1:{srv.port}"
+            loop = asyncio.get_running_loop()
+
+            def call(words, answer):
+                lines = []
+                code = cli.try_request(SimpleNamespace(request=words, server=base), confirm=lambda p: answer,
+                                       interactive=True, out=lines.append)
+                return code, "\n".join(lines)
+            plain = await loop.run_in_executor(None, call, ["hello"], "")
+            gated = await loop.run_in_executor(None, call, ["send", "it"], "y")
+            return plain, gated
+    (code1, text1), (code2, text2) = asyncio.run(scenario())
+    assert code1 == 0 and "Luna: Answer: hello" in text1
+    assert code2 == 0 and "Approval card" in text2 and "Action: send_message to=Sam" in text2
+    assert "Luna: Sent it to Sam." in text2 and fake.resolved == [("session-1", "once", "req-1")]

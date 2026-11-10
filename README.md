@@ -12,12 +12,12 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT licence"></a>
 </p>
 
-<p align="center"><a href="#install">Install</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="ios/README.md">iPhone app</a></p>
+<p align="center"><a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="ios/README.md">iPhone app</a></p>
 
-> **Status: 0.2.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
+> **Status: 0.3.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. The approval card was tested end to end against a live gateway.
-> 50 plugin tests and 34 app-core tests; `hermes plugins validate` passes (security scan: safe).
+> 62 plugin tests and 34 app-core tests; `hermes plugins validate` passes (security scan: safe).
 
 Your Hermes agent knows your notes, calendar, servers and skills, but it lives behind a
 keyboard. The assistant built into Ray-Ban Meta glasses is always with you, but it doesn't
@@ -48,14 +48,34 @@ You need:
 
 ```bash
 hermes plugins install brukchip/hermes-lens --enable --yes-deps   # or `hermes-lens` once it is in the catalog
-hermes config set HERMES_LENS_TOKEN "$(openssl rand -hex 32)"
-hermes config set GEMINI_API_KEY "<your Gemini key>"
+hermes lens setup          # creates the token, checks your Gemini key, tells you what is missing
 hermes gateway restart
+hermes lens setup          # run it again: every line should now show ✓
+```
+
+`hermes lens setup` creates the access token, asks for your Gemini key if it is not set (input
+hidden), checks that the key can use the Live model, checks that the gateway serves the plugin,
+and, with Tailscale installed, finds your tailnet address. It then prints exactly what to type into
+the app. To reach the plugin from the phone over HTTPS on your tailnet only:
+
+```bash
 tailscale serve --bg --https=8443 http://127.0.0.1:8795
 ```
 
-In the app, enter the server address (for example `https://<machine>.<tailnet>.ts.net:8443`)
-and the same token, connect the glasses with **Set up with Meta AI**, then tap **Talk to Luna**.
+In the app, enter the server address and token that `setup` printed, connect the glasses with
+**Set up with Meta AI**, then tap **Talk to Luna**.
+
+### Try it without glasses
+
+```bash
+hermes lens try "What's on my calendar today?"
+hermes lens try "Start a background job that sends me hello"
+```
+
+`try` sends one request through the running plugin exactly as the app does: it starts a call
+(minting a real single-use Gemini grant, never shown), asks your agent, and prints the answer. If
+Hermes needs approval, the terminal shows the same card the phone would, and only typing `y`
+approves; anything else, or no terminal, declines. The second example shows the tap rule at work.
 
 ## How it works
 
@@ -162,6 +182,11 @@ keeping you on the call.
   from your tap on that call, with `once` or `deny`, and only the exact approval shown on the
   card. With no live call to show a card on, it denies. Rotating `HERMES_LENS_TOKEN` locks out
   every phone at once.
+- **`hermes lens` commands:** `setup` writes `HERMES_LENS_TOKEN` (and `GEMINI_API_KEY` if you
+  type one) to the profile's `.env`, makes one read-only request to Google to check the key and
+  model (the key goes in a header), calls the plugin's own `/health`, and reads `tailscale status`
+  and `tailscale serve status` if Tailscale is installed. It never changes what Tailscale serves and
+  never prints the Gemini key. `try` talks only to the plugin, with the same token as the phone.
 - **Authentication:** the phone authenticates with the bearer token. Because of that, the plugin
   marks its sessions as adapter-authorized, so no pairing code is needed. Anyone holding the
   token can talk to your agent, so keep it secret and the port off the public internet.
