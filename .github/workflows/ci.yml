@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    name: Plugin (Hermes ${{ matrix.hermes }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        hermes: [v0.22.5, v0.23.1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ matrix.hermes }}
+          path: hermes
+      - uses: astral-sh/setup-uv@v6
+      - name: Install Hermes
+        working-directory: hermes
+        run: uv sync --frozen --extra messaging --group dev
+      - name: Validate and test
+        working-directory: plugin
+        shell: bash
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/hermes"
+          export HOME="$RUNNER_TEMP/home" HERMES_HOME="$RUNNER_TEMP/hermes-home"
+          mkdir -p "$HOME" "$HERMES_HOME"
+          "$GITHUB_WORKSPACE/hermes/.venv/bin/hermes" plugins validate .
+          "$GITHUB_WORKSPACE/hermes/.venv/bin/python" -m pytest -q tests
+
+  app-core:
+    name: App core (Swift)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test HermesLensCore
+        run: swift test --package-path ios/Packages/HermesLensCore

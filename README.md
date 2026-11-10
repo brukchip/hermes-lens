@@ -1,55 +1,115 @@
-<p align="center"><img src="docs/logo.png" width="320" alt="Hermes Lens"></p>
+<p align="center"><img src="docs/logo.png" width="180" alt="Luna, the Hermes Lens companion"></p>
 
-# Hermes Lens: your Hermes agent on Ray-Ban Meta glasses
+<h1 align="center">Hermes Lens</h1>
 
-**Your agent, out in the real world: it sees what you see, hears you, and acts, but only when
-you tap Approve.**
+<p align="center"><b>Your own Hermes agent on Ray-Ban Meta glasses.</b><br>
+It sees what you see, hears you, and acts, but only when you tap Approve.</p>
+
+<p align="center">
+  <a href="https://github.com/brukchip/hermes-lens/actions/workflows/ci.yml"><img src="https://github.com/brukchip/hermes-lens/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/brukchip/hermes-lens/releases"><img src="https://img.shields.io/github/v/release/brukchip/hermes-lens" alt="Release"></a>
+  <a href="https://hermes-agent.nousresearch.com"><img src="https://img.shields.io/badge/Hermes-%E2%89%A5%200.22.5-6f42c1" alt="Hermes 0.22.5 or newer"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT licence"></a>
+</p>
+
+<p align="center"><a href="#install">Install</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="ios/README.md">iPhone app</a></p>
+
+> **Status: 0.2.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
+> photo looks, business card to contact, questions answered by the Hermes agent, interrupting
+> mid-answer and ending calls. The approval card was tested end to end against a live gateway.
+> 50 plugin tests and 34 app-core tests run in CI on Hermes 0.22.5 and 0.23.1.
 
 Your Hermes agent knows your notes, calendar, servers and skills, but it lives behind a
 keyboard. The assistant built into Ray-Ban Meta glasses is always with you, but it doesn't
-know you and can't act on your behalf. Hermes Lens connects the two: put the glasses on and
-talk to *your own* Hermes agent, hands-free.
+know you and can't act for you. Hermes Lens connects the two: put the glasses on and talk to
+*your own* Hermes agent, hands-free.
+
+## What you can say
 
 - **"What am I looking at?"** One deliberate photo from the glasses camera, described aloud.
 - **"Save this contact."** It reads a business card and opens a prefilled contact on your phone.
 - **"What's on my calendar after lunch?"** Your agent answers from your own data, in your ear.
 - **"Send me today's summary on Telegram."** Hermes runs it in the background and reports back.
-- **Actions Hermes gates wait for your tap.** An **Approve / Decline** card on the phone shows
-  the action itself: for a background job, when it runs, where its result goes and the whole
-  instruction. A spoken "yes" never counts.
 
-Private by design: the camera takes one frame only when asked (never a continuous stream),
-photos and clips stay on your phone, call audio goes straight between the phone and Google,
-and your API key never leaves your server.
+Anything Hermes gates waits for your tap on an **Approve / Decline** card that shows the action
+itself. A spoken "yes" never counts.
 
-Hermes Lens is a **Hermes platform plugin** plus an **iPhone app** (`ios/`):
+## Install
 
+You need:
+
+- Hermes Agent **0.22.5 or newer**, running the messaging gateway.
+- A **Gemini API key** with Live API access ([Google AI Studio](https://aistudio.google.com/apikey)).
+- **Ray-Ban Meta glasses**, the Meta AI app in Developer Mode, and an iPhone with the app built
+  from [`ios/`](ios/README.md) in Xcode. Meta does not yet allow apps built on its glasses
+  toolkit in the App Store. On the phone the app is called **Luna**.
+- A way for the phone to reach the gateway over **HTTPS**, for example
+  [`tailscale serve`](https://tailscale.com/kb/1312/serve) in front of `127.0.0.1:8795`.
+
+```bash
+hermes plugins install brukchip/hermes-lens --enable --yes-deps   # or `hermes-lens` once it is in the catalog
+hermes config set HERMES_LENS_TOKEN "$(openssl rand -hex 32)"
+hermes config set GEMINI_API_KEY "<your Gemini key>"
+hermes gateway restart
+tailscale serve --bg --https=8443 http://127.0.0.1:8795
 ```
- Ray-Ban Meta ──Bluetooth──▶ iPhone (Hermes Lens app) ──audio──▶ Gemini Live
-   mic, speakers, camera          │   look · record · save contact      │ talks, listens,
-                                  │   (run on the phone)                 │ barge-in, search
-                                  │                                      ▼
-                                  └──── ask_luna("…") ──▶ Hermes gateway + this plugin
-                                        approval taps  ◀── your agent: memory, tools, skills
+
+In the app, enter the server address (for example `https://<machine>.<tailnet>.ts.net:8443`)
+and the same token, connect the glasses with **Set up with Meta AI**, then tap **Talk to Luna**.
+
+## How it works
+
+Hermes Lens is a **Hermes platform plugin** (this folder) plus an **iPhone app** ([`ios/`](ios/README.md)).
+
+```mermaid
+sequenceDiagram
+    actor You as You (glasses)
+    participant App as iPhone app
+    participant Gemini as Gemini Live
+    participant Lens as hermes-lens plugin
+    participant Agent as Your Hermes agent
+    App->>Lens: Start a call
+    Lens-->>App: Single-use, locked Gemini grant
+    You->>Gemini: "What's on my calendar after lunch?" (audio via the app)
+    Gemini->>App: ask_luna("calendar after lunch")
+    App->>Lens: The request
+    Lens->>Agent: An ordinary message in the hermes_lens chat
+    Agent-->>Lens: The answer
+    Lens-->>App: A speakable answer
+    App->>Gemini: Tool result
+    Gemini-->>You: Spoken answer
 ```
 
-- **Gemini Live is the voice.** It handles small talk, real-time facts (with Google Search) and
-  the glasses camera, at conversational speed.
+- **Gemini Live is the voice.** It handles conversation, real-time facts (with Google Search) and
+  the camera, at conversational speed, and you can interrupt it. Call audio goes straight between
+  the phone and Google; it never passes through the plugin or Hermes.
 - **Hermes is the brain.** Anything that needs *your* data or an action becomes an ordinary
   message in the `hermes_lens` chat, so your agent answers with the same memory, tools, skills,
   cron jobs and approval rules it has everywhere else. The answer is read aloud.
-- **Approvals stay yours.** When Hermes wants to do something gated (run a risky command, or
-  start or change a background job from the glasses), an **Approve / Decline** card appears on
-  the phone showing the action itself. Text longer than 2,000 characters is marked as cut, with
-  the number of characters not shown.
-  A spoken "yes" never counts, unanswered cards are denied after two minutes or when you hang
-  up, and a call never grants a standing approval.
-  This uses Hermes's own approval gate: if you run Hermes with approvals switched off (yolo
-  mode, or `approvals.mode: off`), Hermes approves by itself and no card appears.
 - **The camera stays on the phone.** `look`, `record_video` and `save_contact` run in the app.
-  A business card becomes a prefilled contact that you confirm in Apple's own sheet.
+  The camera takes one frame only when asked, never a stream, and photos and clips stay on the
+  phone. A business card becomes a prefilled contact that you confirm in Apple's own sheet.
 
-## What the plugin does
+## Safety model
+
+- **Only a tap approves.** When Hermes wants to do something gated (a risky command, or starting
+  or changing a background job from the glasses), the phone shows an **Approve / Decline** card.
+  You tap it, or give the glasses touchpad a deliberate double tap once the card has been on
+  screen for 1.5 seconds. A spoken "yes" never counts, and a call never grants a standing approval.
+- **The card shows the action itself.** For a background job: when it runs, where its result goes,
+  the whole instruction and every other argument. Text past 2,000 characters is marked as cut,
+  with the number of characters not shown.
+- **Silence is a no.** Unanswered cards are denied after two minutes, and hanging up denies them at
+  once. With no live call to show a card on, the plugin denies.
+- **The tap rule.** A `pre_tool_call` hook holds background jobs started from the glasses for your
+  tap, even where Hermes would not ask. It uses Hermes's own approval gate, so if you run Hermes
+  with approvals switched off (yolo mode, or `approvals.mode: off`), Hermes approves by itself and
+  no card appears.
+- **Locked voice grants.** Each call gets a single-use Gemini token (9 minutes or less) whose model,
+  voice, persona and tools are fixed on the server. The phone cannot widen them, and your Gemini
+  key never leaves the server.
+
+## Plugin endpoints
 
 | Endpoint | Purpose |
 |---|---|
@@ -63,30 +123,7 @@ Every request carries a bearer token (`HERMES_LENS_TOKEN`) and a per-install dev
 live call per phone, 30 requests a minute per device (120 in total), and a daily cap on call
 minutes. A retried request never runs twice.
 
-## Requirements
-
-- Hermes Agent **0.22.5 or newer**, running the messaging gateway.
-- A **Gemini API key** with Live API access ([Google AI Studio](https://aistudio.google.com/apikey)).
-- **Ray-Ban Meta glasses**, the Meta AI app in Developer Mode, and an iPhone with the Hermes Lens
-  app built from [`ios/`](ios/README.md). Meta does not yet allow apps built on its glasses
-  toolkit in the App Store, so you build the app with Xcode.
-- A way for the phone to reach the gateway over **HTTPS**, for example
-  [`tailscale serve`](https://tailscale.com/kb/1312/serve) in front of `127.0.0.1:8795`.
-
-## Install
-
-```bash
-hermes plugins install brukchip/hermes-lens   # or `hermes-lens`, once it is in the catalog
-hermes config set HERMES_LENS_TOKEN "$(openssl rand -hex 32)"
-hermes config set GEMINI_API_KEY "<your Gemini key>"
-hermes gateway restart
-tailscale serve --bg --https=8443 http://127.0.0.1:8795
-```
-
-In the app, enter the server address (for example `https://<machine>.<tailnet>.ts.net:8443`)
-and the same token. Tap **Talk to Luna**.
-
-### Settings
+## Settings
 
 | Variable | Default | Meaning |
 |---|---|---|
