@@ -18,6 +18,8 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 > **Status: 0.4.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. The approval card was tested end to end against a live gateway.
+> Sending photos to your agent and the `hermes lens` commands are new in 0.4.0: covered by
+> automated tests, not yet run on glasses or a live gateway.
 > 67 plugin tests and 37 app-core tests; `hermes plugins validate` passes (security scan: safe).
 
 <p align="center">
