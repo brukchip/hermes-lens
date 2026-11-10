@@ -1,0 +1,894 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01606C8FB9DB6B6E8859E66F /* SecureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0A70F6B73A700BDD9249AA /* SecureStore.swift */; };
+		083B09679B49A8959921FEDE /* CallRecordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444D69CC9D511AE71B18D935 /* CallRecordStore.swift */; };
+		0B2EBFB91D890B9055400E71 /* GlassesFrameDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B491815DFACD2EE11C795E8 /* GlassesFrameDecoder.swift */; };
+		143876E96FE6BE72423B2E4F /* LunaNativeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97A6A210FD95373BB8753D26 /* LunaNativeSession.swift */; };
+		1F797D3897E2DF10212F74C9 /* VoiceDiagnosticLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E181D968FDC52131853E154 /* VoiceDiagnosticLog.swift */; };
+		2603D11B29BA31BB59CFC08D /* HermesLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83FB99DCA75FC5EEC9E4422E /* HermesLensApp.swift */; };
+		2BC5D6D568D4B2662BA327B5 /* HermesLensCore in Frameworks */ = {isa = PBXBuildFile; productRef = 87753FCB0443F230D828B5BD /* HermesLensCore */; };
+		30414C1EB5E100B7DC1CB0D2 /* VisualCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7BF2C1C3E940CA0BDFB6D1C /* VisualCaptureView.swift */; };
+		396B095A32087ABA4543D525 /* LunaTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71E8584764314BE2BD7A545D /* LunaTabBar.swift */; };
+		4B02D57F3DEF3BD8C0F79787 /* V3HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747C76D0D84325DADB9E9391 /* V3HomeView.swift */; };
+		6E8EC720783260CEE7A6F494 /* AppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D304E09ACD6161AF74919620 /* AppModelTests.swift */; };
+		7139F283CDA78CE6EBADA077 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */; };
+		736B927C7A8FE0C36CF148C0 /* LunaOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8941D676A1DEA884BEC138D /* LunaOnboardingView.swift */; };
+		73BE239003E43A37976F4944 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 7BFA8503B61434D29A3B2780 /* MWDATCamera */; };
+		759545F86D6DA2500DCAFED9 /* LunaCallPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E011FBEA20DBB3D2F2B3E4 /* LunaCallPanel.swift */; };
+		7AAC3D7A10FB8AD0855C4B9F /* LunaTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 626F5D1DA3F9F2E910406248 /* LunaTasksView.swift */; };
+		7F8B5983CECB05070997880B /* LunaCharacter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB69B78E7E97325DC6957BC4 /* LunaCharacter.swift */; };
+		83299F074ADADDEAFB2843A1 /* AudioDiagnosticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D71DCC032CAC8A7ED3BAE86 /* AudioDiagnosticService.swift */; };
+		8619DAE3D7E789CC08D6D207 /* LibraryFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097CA156AA14F0FB26B04E53 /* LibraryFeed.swift */; };
+		915054D746AC7BBFCF511BAD /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C68B0774B5F2F9548EC099C /* AppEnvironment.swift */; };
+		987EA8529C215D927367D3D5 /* ReminderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 738E2E680685C760D23F9E24 /* ReminderViews.swift */; };
+		A34DF453136F9FD932565993 /* PhotoLibraryExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04E93F0C723BEF2ADEBAEBAC /* PhotoLibraryExportService.swift */; };
+		A5022867E23F779D8C58DEE5 /* NotificationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD731E456AF22E9593EA6A8 /* NotificationDelegate.swift */; };
+		A57EE3000BF3568F62D4605F /* PCM16KAudioTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 522B811D21F8B336BF17900F /* PCM16KAudioTap.swift */; };
+		B34E24479686DCC9996BBA1C /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB31DF52F51E7C21C387E5A4 /* LibraryView.swift */; };
+		B3C3B61387C10FEE26307AD1 /* MWDATInputs in Frameworks */ = {isa = PBXBuildFile; productRef = D2F15E95FAA7BC4D798D390A /* MWDATInputs */; };
+		B47061D0874583052DD6713B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9C6AF3473C699284A4C0316F /* Assets.xcassets */; };
+		B7C817A7F35E760901BE81F6 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8F690DD4A052E6B444086F74 /* MWDATCore */; };
+		B8057CE5B355B0D53E1FE9B2 /* ContactEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB5A66FCD0348CEC82D1EBF /* ContactEditorSheet.swift */; };
+		BC7EFECBA6C06C1949992430 /* RememberSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D9B1428B9D63D702789003 /* RememberSheet.swift */; };
+		C7F000C510B56BBA6C8C0073 /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58B41C7202FFDE855907D48F /* AppShellView.swift */; };
+		C951B87D432962F485A121CC /* LunaIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B987FD1DA15BF357D5FB3D /* LunaIntents.swift */; };
+		CD77373A0364A3C0D06FC231 /* LunaTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11C79ED9DA4900F32CC14A6 /* LunaTheme.swift */; };
+		CD9A349E35C27D3702D0B6EE /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3862CDA35DE0371F81DD0AD3 /* NotificationService.swift */; };
+		D4B32266FBCF42BA78CEB36E /* V3CapabilityLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0950B8E8AC07ECA232E6B79A /* V3CapabilityLabView.swift */; };
+		D6F18FF886925ADE9F81DD8A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB298775A81348EA43DD23FD /* AppModel.swift */; };
+		DB00B9AE08D4D66D52183A0A /* AudioSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C7C40D499DD3ADFEC934B85 /* AudioSessionCoordinator.swift */; };
+		E05EFED2836BB7BD9F69D831 /* HermesLensCore in Frameworks */ = {isa = PBXBuildFile; productRef = E3756AB6BA06159604B48A47 /* HermesLensCore */; };
+		E62FFE76D8FD54608E9EC5B5 /* PersistenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16055F7D85D6A16EAB6B57BC /* PersistenceStore.swift */; };
+		F0CAC643726A0EE8B42DAA8F /* LunaComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 247F26BE7D83AB7CBD79BC2A /* LunaComponents.swift */; };
+		F0F5262BB3B57DA9A43E8D1A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67F71765A2D935A2D2C81421 /* SettingsView.swift */; };
+		F4F84C8A57958167550E7A87 /* MockHermesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E481546E565AA235E3F8BB3 /* MockHermesClient.swift */; };
+		F564E869AA50569C720C5C28 /* LunaUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 096927DE99BF4F4FC08B4EF9 /* LunaUITests.swift */; };
+		F7942DB2C656BC6C954AA4CB /* LunaCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6143E0F284A8C7AEF28879E4 /* LunaCall.swift */; };
+		F7D161E47E051B01BCF26DC1 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 502008C0CBA16BD12EFB0B69 /* AppSettings.swift */; };
+		F92B081B1F06AF5B92093C44 /* ServerConnectionFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9D0A38DBBF5189FCD11F5A /* ServerConnectionFields.swift */; };
+		F97D25B6A731FD76DF27DEFA /* GlassesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF6CB4A818EF5AC2096FD54 /* GlassesService.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		6B9A7AEC5316AECDEF7210CF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F9C37F4435C7D74E14FE7B5D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 07E6098E92726B7B81B7951D;
+			remoteInfo = HermesLens;
+		};
+		8CE6906BB8F008E89349451F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F9C37F4435C7D74E14FE7B5D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 07E6098E92726B7B81B7951D;
+			remoteInfo = HermesLens;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		04E93F0C723BEF2ADEBAEBAC /* PhotoLibraryExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryExportService.swift; sourceTree = "<group>"; };
+		08D9B1428B9D63D702789003 /* RememberSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RememberSheet.swift; sourceTree = "<group>"; };
+		0950B8E8AC07ECA232E6B79A /* V3CapabilityLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V3CapabilityLabView.swift; sourceTree = "<group>"; };
+		096927DE99BF4F4FC08B4EF9 /* LunaUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaUITests.swift; sourceTree = "<group>"; };
+		097CA156AA14F0FB26B04E53 /* LibraryFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryFeed.swift; sourceTree = "<group>"; };
+		0B491815DFACD2EE11C795E8 /* GlassesFrameDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesFrameDecoder.swift; sourceTree = "<group>"; };
+		0E481546E565AA235E3F8BB3 /* MockHermesClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockHermesClient.swift; sourceTree = "<group>"; };
+		16055F7D85D6A16EAB6B57BC /* PersistenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStore.swift; sourceTree = "<group>"; };
+		1F9D0A38DBBF5189FCD11F5A /* ServerConnectionFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectionFields.swift; sourceTree = "<group>"; };
+		247F26BE7D83AB7CBD79BC2A /* LunaComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaComponents.swift; sourceTree = "<group>"; };
+		29A188FB28EFCF18A523C93E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3862CDA35DE0371F81DD0AD3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		444D69CC9D511AE71B18D935 /* CallRecordStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecordStore.swift; sourceTree = "<group>"; };
+		502008C0CBA16BD12EFB0B69 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		522B811D21F8B336BF17900F /* PCM16KAudioTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCM16KAudioTap.swift; sourceTree = "<group>"; };
+		58B41C7202FFDE855907D48F /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
+		6143E0F284A8C7AEF28879E4 /* LunaCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaCall.swift; sourceTree = "<group>"; };
+		626F5D1DA3F9F2E910406248 /* LunaTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaTasksView.swift; sourceTree = "<group>"; };
+		67C787692CDF32BF66C47D8A /* HermesLensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HermesLensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		67F71765A2D935A2D2C81421 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		6C68B0774B5F2F9548EC099C /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		6C7C40D499DD3ADFEC934B85 /* AudioSessionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionCoordinator.swift; sourceTree = "<group>"; };
+		71E8584764314BE2BD7A545D /* LunaTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaTabBar.swift; sourceTree = "<group>"; };
+		738E2E680685C760D23F9E24 /* ReminderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderViews.swift; sourceTree = "<group>"; };
+		747C76D0D84325DADB9E9391 /* V3HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V3HomeView.swift; sourceTree = "<group>"; };
+		7D71DCC032CAC8A7ED3BAE86 /* AudioDiagnosticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDiagnosticService.swift; sourceTree = "<group>"; };
+		7E181D968FDC52131853E154 /* VoiceDiagnosticLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceDiagnosticLog.swift; sourceTree = "<group>"; };
+		83B987FD1DA15BF357D5FB3D /* LunaIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaIntents.swift; sourceTree = "<group>"; };
+		83FB99DCA75FC5EEC9E4422E /* HermesLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesLensApp.swift; sourceTree = "<group>"; };
+		8D82FE3148935B9FA36581D7 /* HermesLensUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HermesLensUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		97A6A210FD95373BB8753D26 /* LunaNativeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaNativeSession.swift; sourceTree = "<group>"; };
+		9C6AF3473C699284A4C0316F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A8941D676A1DEA884BEC138D /* LunaOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaOnboardingView.swift; sourceTree = "<group>"; };
+		AB298775A81348EA43DD23FD /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		ADB5A66FCD0348CEC82D1EBF /* ContactEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactEditorSheet.swift; sourceTree = "<group>"; };
+		AFF6CB4A818EF5AC2096FD54 /* GlassesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesService.swift; sourceTree = "<group>"; };
+		CB69B78E7E97325DC6957BC4 /* LunaCharacter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaCharacter.swift; sourceTree = "<group>"; };
+		D11C79ED9DA4900F32CC14A6 /* LunaTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaTheme.swift; sourceTree = "<group>"; };
+		D2A6186150FA4A201BF120D2 /* HermesLens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HermesLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D304E09ACD6161AF74919620 /* AppModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModelTests.swift; sourceTree = "<group>"; };
+		DB31DF52F51E7C21C387E5A4 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		E6E011FBEA20DBB3D2F2B3E4 /* LunaCallPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaCallPanel.swift; sourceTree = "<group>"; };
+		E7BF2C1C3E940CA0BDFB6D1C /* VisualCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualCaptureView.swift; sourceTree = "<group>"; };
+		E94CE86745C5F88752E4BCB4 /* HermesLensCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HermesLensCore; path = Packages/HermesLensCore; sourceTree = SOURCE_ROOT; };
+		FAD731E456AF22E9593EA6A8 /* NotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDelegate.swift; sourceTree = "<group>"; };
+		FE0A70F6B73A700BDD9249AA /* SecureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureStore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		390A6EDC3D6920BE35069632 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2BC5D6D568D4B2662BA327B5 /* HermesLensCore in Frameworks */,
+				B7C817A7F35E760901BE81F6 /* MWDATCore in Frameworks */,
+				73BE239003E43A37976F4944 /* MWDATCamera in Frameworks */,
+				B3C3B61387C10FEE26307AD1 /* MWDATInputs in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FAB9292A045642008DFCBCA1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E05EFED2836BB7BD9F69D831 /* HermesLensCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0E6BE99618F918F02BAA1499 /* State */ = {
+			isa = PBXGroup;
+			children = (
+				6C68B0774B5F2F9548EC099C /* AppEnvironment.swift */,
+				AB298775A81348EA43DD23FD /* AppModel.swift */,
+				502008C0CBA16BD12EFB0B69 /* AppSettings.swift */,
+			);
+			path = State;
+			sourceTree = "<group>";
+		};
+		11C40EF1822E390DF8F0EE6A /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				626F5D1DA3F9F2E910406248 /* LunaTasksView.swift */,
+			);
+			path = Tasks;
+			sourceTree = "<group>";
+		};
+		256F9315F1307C9F04616A6A /* HermesLensApp */ = {
+			isa = PBXGroup;
+			children = (
+				9D395F7B7ACC58437E581F35 /* App */,
+				DB4A62993D8E0BF0CD213DC6 /* AppIntents */,
+				E24C2217356852DF684B1AC8 /* Components */,
+				42B7A1F96F040011F8130F70 /* Features */,
+				9CDB9866930AE05931B9142F /* Resources */,
+				6B8C8FB3F54AABB75CE15557 /* Services */,
+				0E6BE99618F918F02BAA1499 /* State */,
+			);
+			path = HermesLensApp;
+			sourceTree = "<group>";
+		};
+		2AD165ABF061F77B1118971C = {
+			isa = PBXGroup;
+			children = (
+				256F9315F1307C9F04616A6A /* HermesLensApp */,
+				7F86BC95921FD99FBDEE1450 /* HermesLensTests */,
+				9A94904D857AD2135CCC68CE /* HermesLensUITests */,
+				F38B75E805F61EFB0CC39F37 /* Packages */,
+				D175BFC5BA0BA3A6EC39352B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		2B152FCB5BBE49AC79CBEFE7 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				1F9D0A38DBBF5189FCD11F5A /* ServerConnectionFields.swift */,
+				67F71765A2D935A2D2C81421 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		2FB7DAAA587EB824FFA4680E /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				A8941D676A1DEA884BEC138D /* LunaOnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		31F5312E12EFF4FB02C2F747 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				ADB5A66FCD0348CEC82D1EBF /* ContactEditorSheet.swift */,
+				E6E011FBEA20DBB3D2F2B3E4 /* LunaCallPanel.swift */,
+				747C76D0D84325DADB9E9391 /* V3HomeView.swift */,
+				E7BF2C1C3E940CA0BDFB6D1C /* VisualCaptureView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		42971DE73DC06FA0DBE6A455 /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				0950B8E8AC07ECA232E6B79A /* V3CapabilityLabView.swift */,
+			);
+			path = Diagnostics;
+			sourceTree = "<group>";
+		};
+		42B7A1F96F040011F8130F70 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				42971DE73DC06FA0DBE6A455 /* Diagnostics */,
+				31F5312E12EFF4FB02C2F747 /* Home */,
+				ACA1C70167A95BBE261AFBAD /* Library */,
+				F30AD39311644AA1A171F849 /* Memories */,
+				2FB7DAAA587EB824FFA4680E /* Onboarding */,
+				7BD7F4B59564B7ABADECDF0F /* Reminders */,
+				2B152FCB5BBE49AC79CBEFE7 /* Settings */,
+				11C40EF1822E390DF8F0EE6A /* Tasks */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		6B8C8FB3F54AABB75CE15557 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				7D71DCC032CAC8A7ED3BAE86 /* AudioDiagnosticService.swift */,
+				6C7C40D499DD3ADFEC934B85 /* AudioSessionCoordinator.swift */,
+				444D69CC9D511AE71B18D935 /* CallRecordStore.swift */,
+				0B491815DFACD2EE11C795E8 /* GlassesFrameDecoder.swift */,
+				AFF6CB4A818EF5AC2096FD54 /* GlassesService.swift */,
+				6143E0F284A8C7AEF28879E4 /* LunaCall.swift */,
+				97A6A210FD95373BB8753D26 /* LunaNativeSession.swift */,
+				0E481546E565AA235E3F8BB3 /* MockHermesClient.swift */,
+				FAD731E456AF22E9593EA6A8 /* NotificationDelegate.swift */,
+				3862CDA35DE0371F81DD0AD3 /* NotificationService.swift */,
+				522B811D21F8B336BF17900F /* PCM16KAudioTap.swift */,
+				16055F7D85D6A16EAB6B57BC /* PersistenceStore.swift */,
+				04E93F0C723BEF2ADEBAEBAC /* PhotoLibraryExportService.swift */,
+				FE0A70F6B73A700BDD9249AA /* SecureStore.swift */,
+				7E181D968FDC52131853E154 /* VoiceDiagnosticLog.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		7BD7F4B59564B7ABADECDF0F /* Reminders */ = {
+			isa = PBXGroup;
+			children = (
+				738E2E680685C760D23F9E24 /* ReminderViews.swift */,
+			);
+			path = Reminders;
+			sourceTree = "<group>";
+		};
+		7F86BC95921FD99FBDEE1450 /* HermesLensTests */ = {
+			isa = PBXGroup;
+			children = (
+				D304E09ACD6161AF74919620 /* AppModelTests.swift */,
+			);
+			path = HermesLensTests;
+			sourceTree = "<group>";
+		};
+		9A94904D857AD2135CCC68CE /* HermesLensUITests */ = {
+			isa = PBXGroup;
+			children = (
+				096927DE99BF4F4FC08B4EF9 /* LunaUITests.swift */,
+			);
+			path = HermesLensUITests;
+			sourceTree = "<group>";
+		};
+		9CDB9866930AE05931B9142F /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				9C6AF3473C699284A4C0316F /* Assets.xcassets */,
+				29A188FB28EFCF18A523C93E /* Info.plist */,
+				367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		9D395F7B7ACC58437E581F35 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				58B41C7202FFDE855907D48F /* AppShellView.swift */,
+				83FB99DCA75FC5EEC9E4422E /* HermesLensApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		ACA1C70167A95BBE261AFBAD /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				097CA156AA14F0FB26B04E53 /* LibraryFeed.swift */,
+				DB31DF52F51E7C21C387E5A4 /* LibraryView.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		D175BFC5BA0BA3A6EC39352B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D2A6186150FA4A201BF120D2 /* HermesLens.app */,
+				67C787692CDF32BF66C47D8A /* HermesLensTests.xctest */,
+				8D82FE3148935B9FA36581D7 /* HermesLensUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		DB4A62993D8E0BF0CD213DC6 /* AppIntents */ = {
+			isa = PBXGroup;
+			children = (
+				83B987FD1DA15BF357D5FB3D /* LunaIntents.swift */,
+			);
+			path = AppIntents;
+			sourceTree = "<group>";
+		};
+		E24C2217356852DF684B1AC8 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				CB69B78E7E97325DC6957BC4 /* LunaCharacter.swift */,
+				247F26BE7D83AB7CBD79BC2A /* LunaComponents.swift */,
+				71E8584764314BE2BD7A545D /* LunaTabBar.swift */,
+				D11C79ED9DA4900F32CC14A6 /* LunaTheme.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		F30AD39311644AA1A171F849 /* Memories */ = {
+			isa = PBXGroup;
+			children = (
+				08D9B1428B9D63D702789003 /* RememberSheet.swift */,
+			);
+			path = Memories;
+			sourceTree = "<group>";
+		};
+		F38B75E805F61EFB0CC39F37 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				E94CE86745C5F88752E4BCB4 /* HermesLensCore */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		07E6098E92726B7B81B7951D /* HermesLens */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F717E02FB03328B8938F6F94 /* Build configuration list for PBXNativeTarget "HermesLens" */;
+			buildPhases = (
+				2DDD7FEEC522F0ED83ACE0A7 /* Sources */,
+				6CBD67558EE0EAF607BBD1CE /* Resources */,
+				390A6EDC3D6920BE35069632 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HermesLens;
+			packageProductDependencies = (
+				87753FCB0443F230D828B5BD /* HermesLensCore */,
+				8F690DD4A052E6B444086F74 /* MWDATCore */,
+				7BFA8503B61434D29A3B2780 /* MWDATCamera */,
+				D2F15E95FAA7BC4D798D390A /* MWDATInputs */,
+			);
+			productName = HermesLens;
+			productReference = D2A6186150FA4A201BF120D2 /* HermesLens.app */;
+			productType = "com.apple.product-type.application";
+		};
+		69D777B51A8FC7920D2F5F94 /* HermesLensTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0642C1938C5F5C271ACA40A0 /* Build configuration list for PBXNativeTarget "HermesLensTests" */;
+			buildPhases = (
+				B8F22BB0847B7715EDAE37D7 /* Sources */,
+				FAB9292A045642008DFCBCA1 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D3239C589FA85BA8EBEC64F1 /* PBXTargetDependency */,
+			);
+			name = HermesLensTests;
+			packageProductDependencies = (
+				E3756AB6BA06159604B48A47 /* HermesLensCore */,
+			);
+			productName = HermesLensTests;
+			productReference = 67C787692CDF32BF66C47D8A /* HermesLensTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DCB42EB09060AA4B5BA6B9C8 /* HermesLensUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 74EABE109525DB090E118731 /* Build configuration list for PBXNativeTarget "HermesLensUITests" */;
+			buildPhases = (
+				BF9CF8B472AA72ECE318095B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5E8652FD9B6B4AABC23E16FA /* PBXTargetDependency */,
+			);
+			name = HermesLensUITests;
+			packageProductDependencies = (
+			);
+			productName = HermesLensUITests;
+			productReference = 8D82FE3148935B9FA36581D7 /* HermesLensUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F9C37F4435C7D74E14FE7B5D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					07E6098E92726B7B81B7951D = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					69D777B51A8FC7920D2F5F94 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					DCB42EB09060AA4B5BA6B9C8 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+						TestTargetID = 07E6098E92726B7B81B7951D;
+					};
+				};
+			};
+			buildConfigurationList = 62438C42D60232D1E4878BA5 /* Build configuration list for PBXProject "HermesLens" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2AD165ABF061F77B1118971C;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D5B5CDC25A5E5B9954D39433 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */,
+				3E24A8F65473A9FBAFB86D2C /* XCLocalSwiftPackageReference "Packages/HermesLensCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D175BFC5BA0BA3A6EC39352B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				07E6098E92726B7B81B7951D /* HermesLens */,
+				DCB42EB09060AA4B5BA6B9C8 /* HermesLensUITests */,
+				69D777B51A8FC7920D2F5F94 /* HermesLensTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		6CBD67558EE0EAF607BBD1CE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B47061D0874583052DD6713B /* Assets.xcassets in Resources */,
+				7139F283CDA78CE6EBADA077 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		2DDD7FEEC522F0ED83ACE0A7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				915054D746AC7BBFCF511BAD /* AppEnvironment.swift in Sources */,
+				D6F18FF886925ADE9F81DD8A /* AppModel.swift in Sources */,
+				F7D161E47E051B01BCF26DC1 /* AppSettings.swift in Sources */,
+				C7F000C510B56BBA6C8C0073 /* AppShellView.swift in Sources */,
+				83299F074ADADDEAFB2843A1 /* AudioDiagnosticService.swift in Sources */,
+				DB00B9AE08D4D66D52183A0A /* AudioSessionCoordinator.swift in Sources */,
+				083B09679B49A8959921FEDE /* CallRecordStore.swift in Sources */,
+				B8057CE5B355B0D53E1FE9B2 /* ContactEditorSheet.swift in Sources */,
+				0B2EBFB91D890B9055400E71 /* GlassesFrameDecoder.swift in Sources */,
+				F97D25B6A731FD76DF27DEFA /* GlassesService.swift in Sources */,
+				2603D11B29BA31BB59CFC08D /* HermesLensApp.swift in Sources */,
+				8619DAE3D7E789CC08D6D207 /* LibraryFeed.swift in Sources */,
+				B34E24479686DCC9996BBA1C /* LibraryView.swift in Sources */,
+				F7942DB2C656BC6C954AA4CB /* LunaCall.swift in Sources */,
+				759545F86D6DA2500DCAFED9 /* LunaCallPanel.swift in Sources */,
+				7F8B5983CECB05070997880B /* LunaCharacter.swift in Sources */,
+				F0CAC643726A0EE8B42DAA8F /* LunaComponents.swift in Sources */,
+				C951B87D432962F485A121CC /* LunaIntents.swift in Sources */,
+				143876E96FE6BE72423B2E4F /* LunaNativeSession.swift in Sources */,
+				736B927C7A8FE0C36CF148C0 /* LunaOnboardingView.swift in Sources */,
+				396B095A32087ABA4543D525 /* LunaTabBar.swift in Sources */,
+				7AAC3D7A10FB8AD0855C4B9F /* LunaTasksView.swift in Sources */,
+				CD77373A0364A3C0D06FC231 /* LunaTheme.swift in Sources */,
+				F4F84C8A57958167550E7A87 /* MockHermesClient.swift in Sources */,
+				A5022867E23F779D8C58DEE5 /* NotificationDelegate.swift in Sources */,
+				CD9A349E35C27D3702D0B6EE /* NotificationService.swift in Sources */,
+				A57EE3000BF3568F62D4605F /* PCM16KAudioTap.swift in Sources */,
+				E62FFE76D8FD54608E9EC5B5 /* PersistenceStore.swift in Sources */,
+				A34DF453136F9FD932565993 /* PhotoLibraryExportService.swift in Sources */,
+				BC7EFECBA6C06C1949992430 /* RememberSheet.swift in Sources */,
+				987EA8529C215D927367D3D5 /* ReminderViews.swift in Sources */,
+				01606C8FB9DB6B6E8859E66F /* SecureStore.swift in Sources */,
+				F92B081B1F06AF5B92093C44 /* ServerConnectionFields.swift in Sources */,
+				F0F5262BB3B57DA9A43E8D1A /* SettingsView.swift in Sources */,
+				D4B32266FBCF42BA78CEB36E /* V3CapabilityLabView.swift in Sources */,
+				4B02D57F3DEF3BD8C0F79787 /* V3HomeView.swift in Sources */,
+				30414C1EB5E100B7DC1CB0D2 /* VisualCaptureView.swift in Sources */,
+				1F797D3897E2DF10212F74C9 /* VoiceDiagnosticLog.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B8F22BB0847B7715EDAE37D7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6E8EC720783260CEE7A6F494 /* AppModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BF9CF8B472AA72ECE318095B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F564E869AA50569C720C5C28 /* LunaUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5E8652FD9B6B4AABC23E16FA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 07E6098E92726B7B81B7951D /* HermesLens */;
+			targetProxy = 6B9A7AEC5316AECDEF7210CF /* PBXContainerItemProxy */;
+		};
+		D3239C589FA85BA8EBEC64F1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 07E6098E92726B7B81B7951D /* HermesLens */;
+			targetProxy = 8CE6906BB8F008E89349451F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0FFB9CC4704496E97ED15875 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMES_BUNDLE_ID).uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = HermesLens;
+			};
+			name = Release;
+		};
+		39D591498242D3D9AED02340 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMES_BUNDLE_ID).tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HermesLens.app/HermesLens";
+			};
+			name = Release;
+		};
+		467312FA7EBE460E76353E53 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				HERMES_APP_DISPLAY_NAME = Luna;
+				HERMES_USES_MOCKS_BY_DEFAULT = NO;
+				INFOPLIST_FILE = HermesLensApp/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMES_BUNDLE_ID)";
+				PRODUCT_MODULE_NAME = HermesLens;
+				PRODUCT_NAME = HermesLens;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		4A735BBCA5C41F2F4D3303F2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				HERMES_APP_DISPLAY_NAME = Luna;
+				HERMES_USES_MOCKS_BY_DEFAULT = NO;
+				INFOPLIST_FILE = HermesLensApp/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMES_BUNDLE_ID)";
+				PRODUCT_MODULE_NAME = HermesLens;
+				PRODUCT_NAME = HermesLens;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		53B43C48613FA11BFC852D64 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HERMES_BUNDLE_ID = com.example.hermeslens;
+				HERMES_DEFAULT_BRIDGE_URL = "";
+				HERMES_URL_SCHEME = hermeslens;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
+				MARKETING_VERSION = 1.0.0;
+				META_APP_ID = 0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		ABE426A3888F5D5B6FA3EC58 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HERMES_BUNDLE_ID = com.example.hermeslens;
+				HERMES_DEFAULT_BRIDGE_URL = "";
+				HERMES_URL_SCHEME = hermeslens;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
+				MARKETING_VERSION = 1.0.0;
+				META_APP_ID = 0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		B6EE3447D2D4AD0D1B5B54A8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMES_BUNDLE_ID).uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = HermesLens;
+			};
+			name = Debug;
+		};
+		E8E6BD3BEF2EED0658A81E2A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(HERMES_BUNDLE_ID).tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HermesLens.app/HermesLens";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0642C1938C5F5C271ACA40A0 /* Build configuration list for PBXNativeTarget "HermesLensTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E8E6BD3BEF2EED0658A81E2A /* Debug */,
+				39D591498242D3D9AED02340 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		62438C42D60232D1E4878BA5 /* Build configuration list for PBXProject "HermesLens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				53B43C48613FA11BFC852D64 /* Debug */,
+				ABE426A3888F5D5B6FA3EC58 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		74EABE109525DB090E118731 /* Build configuration list for PBXNativeTarget "HermesLensUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B6EE3447D2D4AD0D1B5B54A8 /* Debug */,
+				0FFB9CC4704496E97ED15875 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F717E02FB03328B8938F6F94 /* Build configuration list for PBXNativeTarget "HermesLens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4A735BBCA5C41F2F4D3303F2 /* Debug */,
+				467312FA7EBE460E76353E53 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		3E24A8F65473A9FBAFB86D2C /* XCLocalSwiftPackageReference "Packages/HermesLensCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/HermesLensCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D5B5CDC25A5E5B9954D39433 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7BFA8503B61434D29A3B2780 /* MWDATCamera */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D5B5CDC25A5E5B9954D39433 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
+			productName = MWDATCamera;
+		};
+		87753FCB0443F230D828B5BD /* HermesLensCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HermesLensCore;
+		};
+		8F690DD4A052E6B444086F74 /* MWDATCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D5B5CDC25A5E5B9954D39433 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
+			productName = MWDATCore;
+		};
+		D2F15E95FAA7BC4D798D390A /* MWDATInputs */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D5B5CDC25A5E5B9954D39433 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
+			productName = MWDATInputs;
+		};
+		E3756AB6BA06159604B48A47 /* HermesLensCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HermesLensCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = F9C37F4435C7D74E14FE7B5D /* Project object */;
+}

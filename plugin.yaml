@@ -1,0 +1,68 @@
+name: hermes-lens
+label: Hermes Lens
+kind: platform
+version: "0.2.0"
+manifest_version: 2
+license: MIT
+homepage: https://github.com/brukchip/hermes-lens
+tags: [platform, voice, glasses, ray-ban-meta, gemini-live, ios]
+requires_hermes: ">=0.22.5"
+author: brukchip
+description: >
+  Ray-Ban Meta glasses as a Hermes channel. A companion iPhone app holds a live voice
+  call with Gemini Live; this plugin mints each call's locked, single-use Gemini grant and
+  turns the voice model's requests into ordinary messages in this chat, so your own Hermes
+  agent answers with its memory, tools and skills. Hermes approval requests appear as an
+  Approve / Decline card on the phone and only your tap resolves them. The glasses camera
+  (look, record, business-card contacts) runs on the phone.
+provides_hooks:
+  - pre_tool_call   # the tap rule: listed tools called from the glasses wait for Approve
+python_dependencies:
+  - "aiohttp>=3.9,<4"
+requires_env:
+  - name: HERMES_LENS_TOKEN
+    description: "Shared secret the iPhone app sends as a Bearer token (at least 24 random characters, e.g. `openssl rand -hex 32`)"
+    prompt: "Hermes Lens access token"
+    password: true
+  - name: GEMINI_API_KEY
+    description: "Google Gemini API key with Live API access; used only to mint short-lived, single-use call tokens"
+    prompt: "Gemini API key"
+    url: "https://aistudio.google.com/apikey"
+    password: true
+optional_env:
+  - name: HERMES_LENS_HOST
+    description: "Bind address (default 127.0.0.1; expose it with a TLS proxy such as `tailscale serve`)"
+    prompt: "Bind host"
+    password: false
+  - name: HERMES_LENS_PORT
+    description: "Listen port (default 8795)"
+    prompt: "Listen port"
+    password: false
+  - name: HERMES_LENS_ASSISTANT_NAME
+    description: "What the voice companion calls itself (default Luna)"
+    prompt: "Assistant name"
+    password: false
+  - name: HERMES_LENS_USER_NAME
+    description: "Your name, so the companion can address you (optional)"
+    prompt: "Your name"
+    password: false
+  - name: HERMES_LENS_PERSONA_NOTES
+    description: "Extra guidance for the voice companion, e.g. languages you speak (optional)"
+    prompt: "Persona notes"
+    password: false
+  - name: HERMES_LENS_VOICE
+    description: "Gemini prebuilt voice (default Kore)"
+    prompt: "Voice"
+    password: false
+  - name: HERMES_LENS_MODEL
+    description: "Gemini Live model (default gemini-3.8-live)"
+    prompt: "Model"
+    password: false
+  - name: HERMES_LENS_CONFIRM_TOOLS
+    description: "Tools that need your tap when asked for through the glasses (default cronjob_manage,cronjob,send_message; none to turn off)"
+    prompt: "Tools that need a tap"
+    password: false
+  - name: HERMES_LENS_DAILY_MINUTES
+    description: "Daily cap on call minutes (default 60)"
+    prompt: "Daily call minutes"
+    password: false

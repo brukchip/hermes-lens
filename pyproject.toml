@@ -1,0 +1,9 @@
+[project]
+name = "hermes-lens"
+version = "0.2.0"
+description = "Ray-Ban Meta glasses as a Hermes channel"
+requires-python = ">=3.10"
+dependencies = ["aiohttp>=3.9,<4"]
+
+[tool.uv]
+package = false

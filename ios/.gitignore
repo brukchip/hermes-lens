@@ -1,0 +1,21 @@
+# Build output
+DerivedData/
+build/
+.build/
+.swiftpm/
+Packages/**/.build/
+Packages/**/.swiftpm/
+*.xcresult
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+
+# Local signing / configuration overrides
+Local.xcconfig
+*.mobileprovision
+*.p12
+.env
+.env.*
+
+.DS_Store
