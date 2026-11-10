@@ -81,6 +81,11 @@ approves; anything else, or no terminal, declines. The second example shows the 
 
 Hermes Lens is a **Hermes platform plugin** (this folder) plus an **iPhone app** ([`ios/`](ios/README.md)).
 
+**Your agent, any model.** Hermes Lens does not pick a model for you: answers come from your own
+Hermes agent on whatever provider you run. The parts that talk to Hermes (requests, approval cards,
+the tap rule) do not depend on Gemini or Meta. This release supports one voice service (Gemini Live)
+and one kind of glasses (Ray-Ban Meta); other voice services and devices are planned, not built yet.
+
 ```mermaid
 sequenceDiagram
     actor You as You (glasses)
