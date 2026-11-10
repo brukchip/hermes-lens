@@ -17,7 +17,7 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 > **Status: 0.2.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. The approval card was tested end to end against a live gateway.
-> 50 plugin tests and 34 app-core tests run in CI on Hermes 0.22.5 and 0.23.1.
+> 50 plugin tests and 34 app-core tests; `hermes plugins validate` passes (security scan: safe).
 
 Your Hermes agent knows your notes, calendar, servers and skills, but it lives behind a
 keyboard. The assistant built into Ray-Ban Meta glasses is always with you, but it doesn't
