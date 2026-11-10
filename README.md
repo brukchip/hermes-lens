@@ -1,8 +1,9 @@
 <p align="center"><img src="docs/logo.png" width="180" alt="Luna, the Hermes Lens companion"></p>
 
-<h1 align="center">Hermes Lens</h1>
+<h1 align="center">Hermes Lens: your Hermes agent on Ray-Ban Meta glasses</h1>
 
-<p align="center"><b>Your own Hermes agent on Ray-Ban Meta glasses.</b><br>
+<p align="center"><b>Hermes Lens is an open-source (MIT) Hermes Agent platform plugin and iPhone app that
+connects Ray-Ban Meta glasses to your own Hermes agent.</b><br>
 It sees what you see, answers in your ear, and gated actions wait for your tap.</p>
 
 <p align="center">
@@ -12,7 +13,7 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT licence"></a>
 </p>
 
-<p align="center"><a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="ios/README.md">iPhone app</a></p>
+<p align="center"><a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="#faq">FAQ</a> · <a href="ios/README.md">iPhone app</a></p>
 
 > **Status: 0.4.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
@@ -211,6 +212,44 @@ keeping you on the call.
 - **Authentication:** the phone authenticates with the bearer token. Because of that, the plugin
   marks its sessions as adapter-authorized, so no pairing code is needed. Anyone holding the
   token can talk to your agent, so keep it secret and the port off the public internet.
+
+## FAQ
+
+### Does Hermes Lens work without glasses?
+
+Partly. `hermes lens try "<request>"` sends a request through the plugin from a terminal and shows
+your agent's answer and any approval card, with no glasses or phone. The live voice call and the
+camera need the iPhone app and Ray-Ban Meta glasses.
+
+### Which glasses and phones are supported?
+
+Ray-Ban Meta glasses, through Meta's Wearables Device Access Toolkit with the Meta AI app in
+Developer Mode, and an iPhone on iOS 17.2 or newer. It was tested with an iPhone 13. There is no
+Android app.
+
+### Which AI model does it use?
+
+Your Hermes agent answers on whatever model and provider you have set up in Hermes; Hermes Lens
+does not choose one. The live voice is Gemini Live, so you need a Gemini API key with Live API
+access. The default voice model is `gemini-3.8-live` (`HERMES_LENS_MODEL`).
+
+### Is my audio or camera sent to my server?
+
+Call audio goes directly between the phone and Google; it never passes through the plugin or
+Hermes. A photo goes to Gemini only when Luna looks during a call, and to your Hermes server only
+when you ask Luna to give it to your agent. Video clips stay on the phone.
+
+### Why is the app not on the App Store?
+
+Meta does not yet allow apps built on its glasses toolkit in the App Store, so you build the app
+from [`ios/`](ios/README.md) with Xcode. A free Apple Personal Team works, but the app then has to
+be rebuilt every 7 days.
+
+### How is it different from the Meta AI assistant built into the glasses?
+
+Meta AI is Meta's own assistant and is not connected to your Hermes agent. Hermes Lens routes your
+requests to the Hermes agent you run yourself, with its memory, tools, skills and scheduled jobs,
+and anything Hermes gates waits for your tap on the phone.
 
 ## Development
 
