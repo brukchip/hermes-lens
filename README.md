@@ -19,6 +19,13 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 > mid-answer and ending calls. The approval card was tested end to end against a live gateway.
 > 62 plugin tests and 34 app-core tests; `hermes plugins validate` passes (security scan: safe).
 
+<p align="center">
+  <img src="docs/screens/home.png" width="270" alt="Home: glasses ready, Talk to Luna">
+  &nbsp;
+  <img src="docs/screens/call.png" width="270" alt="A live call through the glasses: what you said and Luna's answer">
+</p>
+<p align="center"><sub>Real screens from a call on Ray-Ban Meta glasses.</sub></p>
+
 Your Hermes agent knows your notes, calendar, servers and skills, but it lives behind a
 keyboard. The assistant built into Ray-Ban Meta glasses is always with you, but it doesn't
 know you and can't act for you. Hermes Lens connects the two: put the glasses on and talk to
