@@ -101,4 +101,56 @@ private final class NativeRequests: @unchecked Sendable {
         }
         #expect(requests.values.count == 1)
     }
+
+    private static func body(_ request: URLRequest) -> [String: Any] {
+        var data = request.httpBody ?? Data()
+        if data.isEmpty, let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(buffer, count: count)
+            }
+        }
+        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    @Test func photosAreStagedThenReferencedByIDOnTheToolCall() async throws {
+        let client = try broker()
+        let requests = NativeRequests()
+        let photoID = String(repeating: "ab", count: 16)
+        NativeStub.handler = { request in
+            _ = requests.append(request)
+            if request.url?.path == "/v1/lens/native/photos" {
+                return (200, Data(#"{"photoID":"\#(photoID)"}"#.utf8))
+            }
+            return (200, Data(#"{"response":{"result":"ok"}}"#.utf8))
+        }
+        defer { NativeStub.handler = nil }
+        let callID = UUID()
+        let id = try await client.uploadPhoto(callID: callID, jpeg: Data([0xFF, 0xD8, 0xFF, 0xE0]))
+        #expect(id == photoID)
+        let upload = try #require(requests.values.first)
+        #expect(upload.httpMethod == "POST")
+        #expect(upload.value(forHTTPHeaderField: "Content-Type") == "image/jpeg")
+        #expect(upload.value(forHTTPHeaderField: "X-Call-ID") == callID.uuidString.lowercased())
+        #expect(upload.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-device-token")
+        let call = LunaNativeToolCall(id: "fc-9", name: "ask_luna", request: "Keep these", arguments: ["attach_photos": "true"])
+        _ = try await client.runTool(callID: callID, call: call, photoIDs: [id])
+        _ = try await client.runTool(callID: callID, call: call)
+        let withPhotos = Self.body(requests.values[1])["args"] as? [String: Any]
+        let without = Self.body(requests.values[2])["args"] as? [String: Any]
+        #expect(withPhotos?["photoIDs"] as? [String] == [id] && withPhotos?["request"] as? String == "Keep these")
+        #expect(without?.keys.sorted() == ["request"])
+    }
+
+    @Test func aRefusedPhotoUploadThrowsInsteadOfSilentlyDroppingIt() async throws {
+        let client = try broker()
+        NativeStub.handler = { _ in (415, Data()) }
+        defer { NativeStub.handler = nil }
+        await #expect(throws: (any Error).self) {
+            _ = try await client.uploadPhoto(callID: UUID(), jpeg: Data([1, 2, 3]))
+        }
+    }
 }

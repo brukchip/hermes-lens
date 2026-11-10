@@ -49,6 +49,7 @@ MAX_TURN_MESSAGES = 20
 DEFAULT_CONFIRM_TOOLS = "cronjob_manage,cronjob,send_message"  # job tool names differ across versions
 READ_ONLY_ACTIONS = {"cronjob_manage": {"list"}, "cronjob": {"list"}}
 VERIFIED_SECONDS = 15 * 60  # how long a phone's last authenticated request vouches for it
+PHOTO_TTL_SECONDS = 15 * 60  # a staged glasses photo nobody asked about is dropped after this
 CONFIG_BUILD = 1
 
 
@@ -121,6 +122,9 @@ class HermesLensAdapter(BasePlatformAdapter):
         self._turn_messages: Dict[str, list] = {}  # chat -> non-interim sends this turn
         self._asks: Dict[tuple, tuple] = {}  # (call, tool call id) -> (time, response body or None)
         self._tasks: set = set()
+        # call -> {"device", "created", "items": {photo id: JPEG}}: look photos the phone staged
+        # for this call, kept in memory only until an ask_luna with attach_photos uses them.
+        self._photos: Dict[str, dict] = {}
 
     # ----- lifecycle -------------------------------------------------------------------------
 
@@ -158,11 +162,13 @@ class HermesLensAdapter(BasePlatformAdapter):
         self._broker = grant.CallBroker(usage, api_key=self.gemini_key, model=self.model,
                                         voice_name=self.voice_name, persona=self.persona,
                                         daily_seconds=self.daily_seconds, http_post=http_post)
-        app = web.Application(client_max_size=voice.MAX_BODY_BYTES, middlewares=[self._guard])
+        # Photos need room; every JSON route still checks its own, much smaller, limit.
+        app = web.Application(client_max_size=voice.MAX_PHOTO_BYTES + 64 * 1024, middlewares=[self._guard])
         app.router.add_post("/v1/lens/realtime/calls", self._create_call)
         app.router.add_delete("/v1/lens/realtime/calls/{call_id}", self._end_call)
         app.router.add_post("/v1/lens/native/tools", self._ask)
         app.router.add_post("/v1/lens/native/approvals", self._approve)
+        app.router.add_post("/v1/lens/native/photos", self._stage_photo)
         app.router.add_get("/v1/lens/config", self._config)
         app.router.add_get("/health", self._health)
 
@@ -184,6 +190,7 @@ class HermesLensAdapter(BasePlatformAdapter):
             with contextlib.suppress(Exception):
                 self._resolve(card, "deny")
         self._cards.clear()
+        self._photos.clear()
         if self._broker:
             with contextlib.suppress(Exception):
                 self._broker.close()
@@ -276,12 +283,44 @@ class HermesLensAdapter(BasePlatformAdapter):
         except ValueError:
             raise grant.GrantError(404, "native_call_not_found") from None
         await self._broker.end(call_id, request["device_id"])
+        staged = self._photos.get(call_id)
+        if staged is not None and staged["device"] == request["device_id"]:
+            del self._photos[call_id]  # unused photos never outlive the call
         for card_id, card in list(self._cards.items()):  # nobody can tap this call's cards now
             if card.call_id == call_id and card.device_id == request["device_id"]:
                 self._cards.pop(card_id, None)
                 with contextlib.suppress(Exception):
                     self._resolve(card, "deny")
         return web.Response(status=204, headers={"Cache-Control": "no-store"})
+
+    async def _stage_photo(self, request):
+        """One look photo from the glasses for the caller's own live call. It reaches Hermes only
+        when the voice model asks with attach_photos; otherwise it is dropped with the call."""
+        from aiohttp import web
+        device_id = request["device_id"]
+        try:
+            call_id = str(uuid.UUID(request.headers.get("X-Call-ID", "")))
+        except ValueError:
+            raise voice.VoiceRequestError(400, "native_call_invalid") from None
+        self._broker.live_call(call_id, device_id)
+        jpeg = voice.validate_photo(request.headers.get("Content-Type", ""), await request.read())
+        staged = self._photos.setdefault(call_id, {"device": device_id, "created": time.monotonic(), "items": {}})
+        if staged["device"] != device_id:
+            raise grant.GrantError(404, "native_call_not_found")
+        if len(staged["items"]) >= voice.MAX_PHOTOS:
+            raise voice.VoiceRequestError(429, "native_photo_limit")
+        photo_id = uuid.uuid4().hex
+        staged["items"][photo_id] = jpeg
+        return web.json_response({"photoID": photo_id}, headers={"Cache-Control": "no-store"})
+
+    def _take_photos(self, call_id: str, device_id: str, photo_ids: tuple) -> list:
+        """The staged JPEGs for these ids, removed from the stage. Any unknown id refuses all."""
+        staged = self._photos.get(call_id)
+        if not photo_ids:
+            return []
+        if staged is None or staged["device"] != device_id or any(i not in staged["items"] for i in photo_ids):
+            raise voice.VoiceRequestError(404, "native_photo_not_found")
+        return [staged["items"].pop(i) for i in photo_ids]
 
     async def _ask(self, request):
         """The voice model's `ask_luna`: one message to Hermes, answered within the call."""
@@ -310,11 +349,18 @@ class HermesLensAdapter(BasePlatformAdapter):
                         headers={"Cache-Control": "no-store"})
                 self._active_call[chat_id] = ask.call_id
                 self._turn_messages.pop(chat_id, None)
+                # Taken only once this request will really run, so a refused ask keeps its photos.
+                paths = await _cache_photos(self._take_photos(ask.call_id, device_id, ask.photo_ids))
+                text = ask.request
+                if paths:  # the agent sees them as images, like a photo sent on any other channel
+                    text += (f"\n\n[{len(paths)} photo(s) taken with the user's glasses during this call "
+                             "are attached.]")
                 # What the voice model relays stays conversational: it can never run a gateway
                 # command or answer an approval prompt. Only the tap on the phone does that.
-                event = MessageEvent(text=ask.request, message_type=MessageType.TEXT,
+                event = MessageEvent(text=text, message_type=MessageType.PHOTO if paths else MessageType.TEXT,
                                      source=self._source(chat_id, device_id), message_id=str(uuid.uuid4()),
-                                     allow_gateway_control=False)
+                                     allow_gateway_control=False, media_urls=paths,
+                                     media_types=["image/jpeg"] * len(paths))
                 self._current_event[chat_id] = event.message_id
                 self._lens_turns[chat_id] = (event.message_id, time.monotonic(), asyncio.Event())
                 response = await self._turn(request, chat_id, device_id, event.message_id,
@@ -473,6 +519,9 @@ class HermesLensAdapter(BasePlatformAdapter):
         for key, (started, _) in list(self._asks.items()):
             if now - started > ASK_REPLAY_SECONDS:
                 del self._asks[key]
+        for call_id, staged in list(self._photos.items()):
+            if now - staged["created"] > PHOTO_TTL_SECONDS:
+                del self._photos[call_id]
         for chat_id, (_, started, _) in list(self._lens_turns.items()):
             if now - started > STALE_TURN_SECONDS:
                 del self._lens_turns[chat_id]
@@ -530,6 +579,14 @@ class HermesLensAdapter(BasePlatformAdapter):
                 return web.json_response({"error": {"code": error.code}}, status=error.status,
                                          headers={"Cache-Control": "no-store"})
         return guard
+
+
+async def _cache_photos(photos: list) -> list:
+    """Hermes's own image cache, the same place other channels put photos users send."""
+    if not photos:
+        return []
+    from gateway.platforms.base import cache_image_from_bytes_async
+    return [await cache_image_from_bytes_async(jpeg, ".jpg") for jpeg in photos]
 
 
 def _digest(token: str) -> bytes:

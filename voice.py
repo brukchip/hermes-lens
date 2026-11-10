@@ -26,6 +26,9 @@ MAX_REQUEST_CHARS = 1_500
 MAX_ANSWER_CHARS = 900
 MAX_SUMMARY_CHARS = 240
 MAX_DETAIL_CHARS = 2_000
+MAX_PHOTOS = 4  # per call, from `look`, sent to the agent only with attach_photos
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
+PHOTO_ID = re.compile(r"^[0-9a-f]{32}$")
 APPROVAL_PENDING = ("An action is still waiting for the user's Approve or Decline tap on their phone. "
                     "Ask them to tap one first, then ask again.")
 TOOL_CALL_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
@@ -41,9 +44,19 @@ TOOL_DECLARATIONS = [
             ),
             "parameters": {
                 "type": "OBJECT",
-                "properties": {"request": {
-                    "type": "STRING", "description": "The user's request, self-contained, in English.",
-                }},
+                "properties": {
+                    "request": {
+                        "type": "STRING", "description": "The user's request, self-contained, in English.",
+                    },
+                    "attach_photos": {
+                        "type": "BOOLEAN",
+                        "description": (
+                            "True when the user wants their agent to see, keep, share or act on the "
+                            "photos taken with look in this call. The newest photos (up to four) go "
+                            "with the request. Leave it out otherwise."
+                        ),
+                    },
+                },
                 "required": ["request"],
             },
             # Gemini keeps talking while Hermes works; the result is spoken when idle.
@@ -130,6 +143,10 @@ def persona(assistant: str = "Luna", user: str = "", notes: str = "") -> str:
         "guess. Use record_video when they ask to record or film. To save a contact from a "
         "business card, call look, read the card, then call save_contact with what is printed; "
         "they check and save it on their phone. Never identify people from their faces. "
+        f"Your photos reach their Hermes agent only when you call {TOOL_NAME} with attach_photos "
+        "true, which sends the photos taken with look in this call: use it when they want their "
+        "agent to see, keep, share or act on a photo, and say in the request what to do with it. "
+        "Never say a photo was sent unless the result says so. "
         + (f"{extra} " if extra else "")
         + "Do not read JSON, status labels or internal names aloud. Wait until the user speaks; "
         "no automatic greeting on connection. Respect interruptions and answer the new question, "
@@ -148,6 +165,7 @@ class AskRequest:
     call_id: str
     tool_call_id: str
     request: str
+    photo_ids: tuple = ()
 
 
 def validate_ask(body: bytes) -> AskRequest:
@@ -168,13 +186,32 @@ def validate_ask(body: bytes) -> AskRequest:
         raise VoiceRequestError(400, "native_tool_invalid")
     if name != TOOL_NAME:
         raise VoiceRequestError(400, "native_tool_unknown")
-    if not isinstance(args, dict) or set(args) != {"request"} or not isinstance(args["request"], str):
+    if (not isinstance(args, dict) or "request" not in args or not set(args) <= {"request", "photoIDs"}
+            or not isinstance(args["request"], str)):
+        raise VoiceRequestError(400, "native_tool_invalid")
+    photo_ids = args.get("photoIDs", [])
+    if (not isinstance(photo_ids, list) or len(photo_ids) > MAX_PHOTOS
+            or not all(isinstance(i, str) and PHOTO_ID.match(i) for i in photo_ids)
+            or len(set(photo_ids)) != len(photo_ids)):
         raise VoiceRequestError(400, "native_tool_invalid")
     request = " ".join(args["request"].split())
     if not request or len(request) > MAX_REQUEST_CHARS or request.startswith("/"):
         # A leading slash would run a Hermes slash command instead of a request.
         raise VoiceRequestError(400, "native_tool_invalid")
-    return AskRequest(call_id, tool_call_id, request)
+    return AskRequest(call_id, tool_call_id, request, tuple(photo_ids))
+
+
+def validate_photo(content_type: str, body: bytes) -> bytes:
+    """One JPEG from the glasses, staged for the caller's own live call."""
+    if (content_type or "").split(";")[0].strip().lower() != "image/jpeg":
+        raise VoiceRequestError(415, "native_photo_type")
+    if not body:
+        raise VoiceRequestError(400, "native_photo_invalid")
+    if len(body) > MAX_PHOTO_BYTES:
+        raise VoiceRequestError(413, "native_photo_size")
+    if not body.startswith(b"\xff\xd8\xff"):
+        raise VoiceRequestError(415, "native_photo_type")
+    return body
 
 
 def validate_approval(body: bytes) -> tuple[str, str, str]:

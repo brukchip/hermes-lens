@@ -504,3 +504,78 @@ def test_hermes_lens_try_works_against_the_real_server_over_http(server, monkeyp
     assert code1 == 0 and "Luna: Answer: hello" in text1
     assert code2 == 0 and "Approval card" in text2 and "Action: send_message to=Sam" in text2
     assert "Luna: Sent it to Sam." in text2 and fake.resolved == [("session-1", "once", "req-1")]
+
+
+JPEG = b"\xff\xd8\xff\xe0" + b"glasses" * 50
+
+
+async def stage(client, call_id, data=JPEG, content_type="image/jpeg", device=DEVICE):
+    h = headers(device=device)
+    h["Content-Type"], h["X-Call-ID"] = content_type, call_id
+    return await client.post("/v1/lens/native/photos", data=data, headers=h)
+
+
+def test_photos_reach_the_agent_as_images_only_when_asked(server, monkeypatch, tmp_path):
+    adapter, fake, app = server
+    cached = []
+
+    async def cache(photos):
+        for jpeg in photos:
+            path = tmp_path / f"img{len(cached)}.jpg"
+            path.write_bytes(jpeg)
+            cached.append(str(path))
+        return cached[-len(photos):] if photos else []
+    monkeypatch.setattr(lens, "_cache_photos", cache)
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        first = await (await stage(client, call_id)).json()
+        second = await (await stage(client, call_id)).json()
+        plain = await ask(client, call_id, "hello")
+        body = {"callID": call_id, "id": "fc-photo", "name": "ask_luna",
+                "args": {"request": "keep these photos", "photoIDs": [first["photoID"], second["photoID"]]}}
+        with_photos = await client.post("/v1/lens/native/tools", data=json.dumps(body), headers=headers())
+        reused = dict(body, id="fc-again")
+        again = await client.post("/v1/lens/native/tools", data=json.dumps(reused), headers=headers())
+        return plain.status, with_photos.status, again.status
+    plain, with_photos, again = run(app, scenario)
+    assert (plain, with_photos, again) == (200, 200, 404)  # a photo is used once
+    text_event, photo_event = fake.events[0], fake.events[1]
+    assert text_event.media_urls == [] and text_event.message_type.value == "text"
+    assert photo_event.message_type.value == "photo" and photo_event.media_types == ["image/jpeg"] * 2
+    assert photo_event.media_urls == cached and "2 photo(s) taken with the user's glasses" in photo_event.text
+    assert adapter._photos[next(iter(adapter._photos))]["items"] == {}
+
+
+def test_staging_is_bound_to_the_callers_live_call_and_bounded(server):
+    adapter, fake, app = server
+    other = "0a0b0c0d-1d2a-4c6b-9e7f-0a1b2c3d4e5f"
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        results = [(await stage(client, call_id, content_type="image/png")).status,
+                   (await stage(client, call_id, data=b"not a jpeg")).status,
+                   (await stage(client, str(uuid.uuid4()))).status,          # no such call
+                   (await stage(client, call_id, device=other)).status,      # someone else's call
+                   (await stage(client, "nope")).status]
+        results += [(await stage(client, call_id)).status for _ in range(5)]
+        await client.delete(f"/v1/lens/realtime/calls/{call_id}", headers=headers())
+        return results, dict(adapter._photos)
+    statuses, staged_after_end = run(app, scenario)
+    assert statuses == [415, 415, 404, 404, 400, 200, 200, 200, 200, 429]
+    assert staged_after_end == {}  # ending the call drops unused photos
+
+
+def test_unknown_photo_ids_refuse_the_request_and_old_photos_expire(server):
+    adapter, fake, app = server
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        await stage(client, call_id)
+        body = {"callID": call_id, "id": "fc-x", "name": "ask_luna",
+                "args": {"request": "send it", "photoIDs": ["f" * 32]}}
+        return call_id, (await client.post("/v1/lens/native/tools", data=json.dumps(body), headers=headers())).status
+    call_id, status = run(app, scenario)
+    assert status == 404 and fake.events == [] and len(adapter._photos[call_id]["items"]) == 1
+    adapter._sweep_once(adapter._photos[call_id]["created"] + lens.PHOTO_TTL_SECONDS + 1)
+    assert adapter._photos == {}

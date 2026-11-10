@@ -109,6 +109,9 @@ final class LunaNativeSession {
     private(set) var turns: [LunaCallTurn] = []
     /// Actions the user approved or declined during this call.
     private(set) var actions: [LunaCallAction] = []
+    /// The look photos taken in this call (newest last, at most four, at most 1440 px), kept in
+    /// memory only so a request can carry them when Luna asks to attach photos. Dropped at the end.
+    @ObservationIgnored private var callPhotos: [Data] = []
     /// A tapped shortcut ("Look") made before the call finished connecting.
     @ObservationIgnored private var pendingAsk: String?
     /// The grant locked in `ask_luna`, so the user's Hermes agent and its tools are reachable.
@@ -478,11 +481,23 @@ final class LunaNativeSession {
             if crowded {
                 result = LunaNativeToolResult(response: LunaNativeWire.toolFailure("Luna is still working on earlier requests."), approval: nil)
                 outcome = "crowded"
+            } else if call.attachesPhotos, self?.callPhotos.isEmpty ?? true {
+                result = LunaNativeToolResult(response: LunaNativeWire.toolFailure(
+                    "No photo was taken in this call yet. Take one with look first, then ask again."), approval: nil)
+                outcome = "no_photo"
             } else if LunaNativeVoice.localTools.contains(call.name) {
                 guard let self else { return }
                 (result, image, outcome) = await self.runLocalTool(call)
             } else {
-                do { result = try await broker.runTool(callID: callID, call: call) }
+                do {
+                    // Photos leave the phone only when Luna asked to attach them to this request,
+                    // and go only to the user's own Hermes server.
+                    var photoIDs: [String] = []
+                    if call.attachesPhotos, let photos = self?.callPhotos.suffix(LunaNativeVoice.maxPhotos) {
+                        for photo in photos { photoIDs.append(try await broker.uploadPhoto(callID: callID, jpeg: photo)) }
+                    }
+                    result = try await broker.runTool(callID: callID, call: call, photoIDs: photoIDs)
+                }
                 catch {
                     if Task.isCancelled { return } // Cancelled by Gemini; the bridge stops the run.
                     result = LunaNativeToolResult(response: LunaNativeWire.toolFailure(), approval: nil); outcome = "bridge_error"
@@ -536,9 +551,11 @@ final class LunaNativeSession {
         do {
             if call.name == "look" {
                 let jpeg = try await localTools.capturePhoto()
+                let copy = Self.forModel(jpeg)
+                callPhotos = Array((callPhotos + [copy]).suffix(LunaNativeVoice.maxPhotos))
                 return (result(LunaNativeWire.toolResult(
                     "Photo taken with the user's glasses and saved to their Library; it is attached to this result. Describe what matters for their question. If no image is attached, say so instead of guessing.")),
-                    Self.forModel(jpeg), "photo")
+                    copy, "photo")
             }
             try await localTools.recordVideo()
             return (result(LunaNativeWire.toolResult(
@@ -1108,7 +1125,7 @@ final class LunaNativeSession {
                 }
             }
         }
-        callID = nil
+        callID = nil; callPhotos = []
         if ownsAudio {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             coordinator.release(.nativeVoice); ownsAudio = false

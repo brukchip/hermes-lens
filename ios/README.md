@@ -138,7 +138,9 @@ crash reporting in `Info.plist`.
 
 - Photos, clips, notes, reminders and call records stay on the phone unless you
   share them. A frame leaves the phone only when Luna looks during a call. It
-  goes to the live model as part of that call.
+  goes to the live model as part of that call. When you ask Luna to give the
+  photos to your agent, the newest ones from that call (up to four, at most
+  1440 px) also go to your own Hermes server with that request.
 - What you say is shown on screen during a call. It is never logged, and only
   the conversation text is saved to the local call record.
 - The camera runs only when you ask Luna to look or record, or tap Look. Home

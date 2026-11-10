@@ -13,6 +13,9 @@ public enum LunaNativeVoice {
     public static let toolName = "ask_luna"
     public static let toolEndpoint = "v1/lens/native/tools"
     public static let approvalEndpoint = "v1/lens/native/approvals"
+    /// Stages one look photo for the user's own Hermes agent (`attach_photos` on `ask_luna`).
+    public static let photoEndpoint = "v1/lens/native/photos"
+    public static let maxPhotos = 4
     /// Tools the grant declares that run on the phone (glasses camera, contacts), never on the bridge.
     public static let localTools: Set<String> = ["look", "record_video", "save_contact"]
     public static let socket = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained"
@@ -124,21 +127,39 @@ public actor LunaNativeBrokerClient {
 
     /// Forwards one Gemini tool call to the bridge; returns the tool response (and any approval card).
     /// Cancelling the calling task drops the request, and the bridge then stops the Hermes run.
-    public func runTool(callID: UUID, call: LunaNativeToolCall) async throws -> LunaNativeToolResult {
+    public func runTool(callID: UUID, call: LunaNativeToolCall, photoIDs: [String] = []) async throws -> LunaNativeToolResult {
         guard call.name == LunaNativeVoice.toolName, let text = call.request else {
             return LunaNativeToolResult(response: LunaNativeWire.toolFailure("That request is not available in this call."), approval: nil)
         }
         var request = identifiedRequest(path: LunaNativeVoice.toolEndpoint, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 75
+        var args: [String: Any] = ["request": text]
+        if !photoIDs.isEmpty { args["photoIDs"] = photoIDs }
         request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "callID": callID.uuidString.lowercased(), "id": call.id, "name": call.name, "args": ["request": text],
-        ])
+            "callID": callID.uuidString.lowercased(), "id": call.id, "name": call.name, "args": args,
+        ] as [String: Any])
         let (data, response) = try await toolSession.data(for: request)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             throw LunaNativeError.connection
         }
         return try LunaNativeToolResult.decode(data)
+    }
+
+    /// Stages one look photo (JPEG) for this call and returns its id. Sent only when Luna asks to
+    /// attach photos; the server hands them to the user's own Hermes agent with that request.
+    public func uploadPhoto(callID: UUID, jpeg: Data) async throws -> String {
+        var request = identifiedRequest(path: LunaNativeVoice.photoEndpoint, method: "POST")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue(callID.uuidString.lowercased(), forHTTPHeaderField: "X-Call-ID")
+        request.timeoutInterval = 30
+        let (data, response) = try await toolSession.upload(for: request, from: jpeg)
+        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = object["photoID"] as? String, id.utf8.count == 32 else {
+            throw LunaNativeError.connection
+        }
+        return id
     }
 
     /// The user's tap on an approval card. The server resumes (or denies) the parked Hermes run
@@ -278,6 +299,9 @@ public struct LunaNativeToolCall: Equatable, Sendable {
     public init(id: String, name: String, request: String?, arguments: [String: String] = [:]) {
         self.id = id; self.name = name; self.request = request; self.arguments = arguments
     }
+
+    /// Luna set `attach_photos`: the request should carry this call's look photos.
+    public var attachesPhotos: Bool { arguments["attach_photos"] == "true" }
 }
 
 public enum LunaNativeWire {
@@ -353,7 +377,9 @@ public enum LunaNativeWire {
                 let request = args["request"] as? String
                 var arguments: [String: String] = [:]
                 for (key, value) in args where key != "request" && (1...32).contains(key.utf8.count) {
-                    guard arguments.count < 12, let text = value as? String, text.utf8.count <= 500 else { continue }
+                    guard arguments.count < 12 else { continue }
+                    if key == "attach_photos", let flag = value as? Bool { arguments[key] = flag ? "true" : "false"; continue }
+                    guard let text = value as? String, text.utf8.count <= 500 else { continue }
                     arguments[key] = text
                 }
                 return LunaNativeToolCall(id: id, name: name, request: request.flatMap { $0.utf8.count <= 4_000 ? $0 : nil },

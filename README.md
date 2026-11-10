@@ -14,10 +14,10 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 
 <p align="center"><a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="ios/README.md">iPhone app</a></p>
 
-> **Status: 0.3.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
+> **Status: 0.4.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. The approval card was tested end to end against a live gateway.
-> 62 plugin tests and 34 app-core tests; `hermes plugins validate` passes (security scan: safe).
+> 67 plugin tests and 37 app-core tests; `hermes plugins validate` passes (security scan: safe).
 
 <p align="center">
   <img src="docs/screens/home.png" width="270" alt="Home: glasses ready, Talk to Luna">
@@ -37,6 +37,8 @@ know you and can't act for you. Hermes Lens connects the two: put the glasses on
 - **"Save this contact."** It reads a business card and opens a prefilled contact on your phone.
 - **"What's on my calendar after lunch?"** Your agent answers from your own data, in your ear.
 - **"Send me today's summary on Telegram."** Hermes runs it in the background and reports back.
+- **"Look at this, then send it to my agent."** The photos from this call go to your own Hermes
+  agent as images, so it can keep them, describe them or pass them on with its own tools.
 
 Anything Hermes gates waits for your tap on an **Approve / Decline** card that shows the action
 itself. A spoken "yes" never counts.
@@ -119,8 +121,10 @@ sequenceDiagram
   message in the `hermes_lens` chat, so your agent answers with the same memory, tools, skills,
   cron jobs and approval rules it has everywhere else. The answer is read aloud.
 - **The camera stays on the phone.** `look`, `record_video` and `save_contact` run in the app.
-  The camera takes one frame only when asked, never a stream, and photos and clips stay on the
-  phone. A business card becomes a prefilled contact that you confirm in Apple's own sheet.
+  The camera takes one frame only when asked, never a stream. Clips stay on the phone, and photos
+  stay there too unless you ask Luna to give them to your agent: then the newest photos from this
+  call (up to four) go to your Hermes server with that request, and your agent sees them as images.
+  A business card becomes a prefilled contact that you confirm in Apple's own sheet.
 
 ## Safety model
 
@@ -149,6 +153,7 @@ sequenceDiagram
 | `DELETE /v1/lens/realtime/calls/{id}` | Ends the call and settles its usage. |
 | `POST /v1/lens/native/tools` | The voice model's `ask_luna(request)` becomes a message to your agent; the reply comes back speakable. |
 | `POST /v1/lens/native/approvals` | Your Approve / Decline tap on a Hermes approval card. |
+| `POST /v1/lens/native/photos` | Stages one look photo (JPEG, 5 MB or less, four per call) for the caller's own live call. It reaches Hermes only with an `ask_luna` that names it. |
 | `GET /v1/lens/config`, `GET /health` | What the app needs to switch on native voice. |
 
 Every request carries a bearer token (`HERMES_LENS_TOKEN`) and a per-install device id. One
@@ -186,6 +191,10 @@ keeping you on the call.
   logs no audio, transcripts, requests, answers or tokens. Your requests and Hermes's answers
   are ordinary messages in the `hermes_lens` chat, so Hermes keeps them in its session history
   and memory exactly as it does for any other channel.
+- **Photos:** a photo the phone stages is held in memory only, and dropped when the call ends,
+  after 15 minutes, or once it is used. A used photo is written to Hermes's own image cache and
+  attached to that message, exactly like a photo sent on Telegram, so Hermes's normal retention
+  applies. Photos are never logged.
 - **Hook:** a `pre_tool_call` hook sends the tools in `HERMES_LENS_CONFIRM_TOOLS` to Hermes's
   own approval gate, but only when the request came through the glasses. Other channels are
   untouched, and a decline or timeout blocks the tool. With Hermes approvals switched off, the

@@ -255,6 +255,14 @@ private let pcm = Data(repeating: 12, count: 960)
     #expect(LunaNativeVoice.localTools.contains("save_contact"))
 }
 
+@Test func attachPhotosIsReadAsABooleanOnlyForThatArgument() throws {
+    let message = #"{"toolCall":{"functionCalls":[{"id":"fc-4","name":"ask_luna","args":{"request":"Keep these","attach_photos":true,"other":true}},{"id":"fc-5","name":"ask_luna","args":{"request":"Hi","attach_photos":false}}]}}"#
+    guard case .toolCalls(let calls)? = try LunaNativeWire.decode(wire(message)).first else { Issue.record("no tool calls"); return }
+    #expect(calls[0].attachesPhotos && calls[0].arguments == ["attach_photos": "true"])
+    #expect(!calls[1].attachesPhotos)
+    #expect(!LunaNativeToolCall(id: "x", name: "ask_luna", request: "Hi").attachesPhotos)
+}
+
 @Test func contactDraftNeedsANameOrCompanyAndTidiesFields() throws {
     #expect(LunaContactDraft(arguments: [:]) == nil)
     #expect(LunaContactDraft(arguments: ["name": "   ", "phone": "+251 911"]) == nil)
