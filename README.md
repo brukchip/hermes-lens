@@ -3,7 +3,7 @@
 <h1 align="center">Hermes Lens</h1>
 
 <p align="center"><b>Your own Hermes agent on Ray-Ban Meta glasses.</b><br>
-It sees what you see, hears you, and acts, but only when you tap Approve.</p>
+It sees what you see, answers in your ear, and gated actions wait for your tap.</p>
 
 <p align="center">
   <a href="https://github.com/brukchip/hermes-lens/actions/workflows/ci.yml"><img src="https://github.com/brukchip/hermes-lens/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
