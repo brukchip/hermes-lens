@@ -7,7 +7,6 @@ connects Ray-Ban Meta glasses to your own Hermes agent.</b><br>
 It sees what you see, answers in your ear, and gated actions wait for your tap.</p>
 
 <p align="center">
-  <a href="https://github.com/brukchip/hermes-lens/actions/workflows/ci.yml"><img src="https://github.com/brukchip/hermes-lens/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/brukchip/hermes-lens/releases"><img src="https://img.shields.io/github/v/release/brukchip/hermes-lens" alt="Release"></a>
   <a href="https://hermes-agent.nousresearch.com"><img src="https://img.shields.io/badge/Hermes-%E2%89%A5%200.22.5-6f42c1" alt="Hermes 0.22.5 or newer"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT licence"></a>
