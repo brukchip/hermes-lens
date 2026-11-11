@@ -12,7 +12,7 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT licence"></a>
 </p>
 
-<p align="center"><a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="#faq">FAQ</a> · <a href="ios/README.md">iPhone app</a></p>
+<p align="center"><a href="https://x.com/BrukInBetween/status/2120584742378557503"><b>▶ Watch the demo</b></a> · <a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="#faq">FAQ</a> · <a href="ios/README.md">iPhone app</a></p>
 
 > **Status: 0.4.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
