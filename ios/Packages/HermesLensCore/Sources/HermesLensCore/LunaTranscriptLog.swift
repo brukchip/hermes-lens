@@ -52,7 +52,14 @@ public struct LunaTranscriptLog: Equatable, Sendable {
     }
 
     /// The user's most recent words came after Luna's current answer (a new question).
-    public var userSpokeLast: Bool { !pending.isEmpty || (!heard.isEmpty && said.isEmpty) }
+    /// True also after a turn that ended with no answer from Luna: the question stays below
+    /// her previous answer.
+    public var userSpokeLast: Bool {
+        if !pending.isEmpty { return true }
+        if !said.isEmpty { return false }
+        if !heard.isEmpty { return true }
+        return committed.last?.speaker == .you
+    }
 
     /// Part of what the user is saying.
     public mutating func user(_ text: String) {

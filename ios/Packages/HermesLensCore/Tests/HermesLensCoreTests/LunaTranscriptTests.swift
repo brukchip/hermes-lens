@@ -148,3 +148,17 @@ private let pcm = Data(repeating: 12, count: 960)
     later.turnEnded()
     #expect(later.entries.map(\.text) == ["What's the time?", "Three.", "thanks", "Your report is ready. It's in your inbox."])
 }
+
+@Test func aQuestionStaysBelowTheOldAnswerWhenItsTurnEndsWithoutAReply() {
+    var state = LunaNativeCallState()
+    state.begin(); state.connected()
+    let id = state.generation
+    state.receive(.inputTranscript("What time is it?"), generation: id)
+    state.receive(.outputTranscript("Three."), generation: id)
+    state.receive(.turnComplete, generation: id)
+    state.receive(.inputTranscript("Check my calendar"), generation: id)
+    // The model answers with a tool call only: the turn completes with no speech.
+    state.receive(.turnComplete, generation: id)
+    #expect(state.heard == "Check my calendar" && state.transcript == "Three.")
+    #expect(state.heardIsLatest)
+}
