@@ -18,7 +18,7 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. 0.5.0 makes the plugin and the app harder to confuse (gateway
 > restarts, declines, talking over a request) and adds a setup code. It was tested on Hermes
-> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. 82 plugin tests and 68 app-core
+> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. 84 plugin tests and 80 app-core
 > tests; `hermes plugins validate` passes with one warning (it uses Hermes's approval module).
 
 <p align="center">
@@ -126,7 +126,9 @@ sequenceDiagram
 ```
 
 - **Gemini Live is the voice.** It handles conversation, real-time facts (with Google Search) and
-  the camera, at conversational speed, and you can interrupt it. Call audio goes straight between
+  the camera, at conversational speed, and you can interrupt it. Talking over Luna while your
+  agent is working does not cancel that request: it keeps running, Luna tells you the result,
+  and a new question waits until it is back (Luna says so). Ending the call cancels it. Call audio goes straight between
   the phone and Google; it never passes through the plugin or Hermes.
 - **Hermes is the brain.** Anything that needs *your* data or an action becomes an ordinary
   message in the `hermes_lens` chat, so your agent answers with the same memory, tools, skills,
@@ -142,7 +144,7 @@ sequenceDiagram
 - **Only a tap approves.** When Hermes wants to do something gated (a risky command, or starting
   or changing a background job from the glasses), the phone shows an **Approve / Decline** card.
   You tap it, or give the glasses touchpad a deliberate double tap once the card has been on
-  screen for 1.5 seconds. A spoken "yes" never counts, and a call never grants a standing approval.
+  screen for 1.5 seconds. A card for a request you talked over can only be approved on screen. A spoken "yes" never counts, and a call never grants a standing approval.
 - **The card shows the action itself.** For a background job: when it runs, where its result goes,
   the whole instruction and every other argument. A single argument past 1,200 characters, or a
   whole card past 2,000, is marked as cut with the number of characters not shown, and the card
