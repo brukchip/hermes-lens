@@ -24,3 +24,21 @@ import Testing
     #expect(LunaCallEnding.warningDelay(remaining: 5) == nil)
     #expect(LunaCallEnding.note.contains("new call"))
 }
+
+@Test func micLevelIsLoggedEveryThirtySecondsOrWhenSpeechStartsOrStops() {
+    // Samples every 5 s: quiet for a minute, then speech, then quiet again.
+    let peaks = Array(repeating: 0.01, count: 12) + [0.3, 0.4] + Array(repeating: 0.0, count: 3)
+    var logged: [Int] = []
+    var last = -Double.infinity
+    var wasSpeech: Bool?
+    for (index, peak) in peaks.enumerated() {
+        let now = Double(index + 1) * LunaLevelTrace.sampleSeconds
+        let speech = LunaLevelTrace.isSpeech(peak)
+        if LunaLevelTrace.logs(speech: speech, wasSpeech: wasSpeech, secondsSinceLogged: now - last) {
+            logged.append(Int(now)); last = now
+        }
+        wasSpeech = speech
+    }
+    // First sample, then every 30 s, then at once when speech starts and when it stops.
+    #expect(logged == [5, 35, 65, 75])
+}

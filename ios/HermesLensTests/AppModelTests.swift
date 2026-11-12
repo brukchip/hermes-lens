@@ -284,3 +284,10 @@ import UIKit
     #expect(!AppSettings(defaults: suite).usesGlassesGestures)
     suite.removePersistentDomain(forName: suiteName)
 }
+
+@Test @MainActor func diagnosticsLogKeepsTheNewestFourThousandLines() {
+    let lines = (0..<(VoiceDiagnosticLog.maximumLines + VoiceDiagnosticLog.trimSlack + 1)).map { "line \($0)" }
+    let kept = VoiceDiagnosticLog.trimmed(lines)
+    #expect(kept.count == 4000)
+    #expect(kept.last == lines.last && kept.first == "line \(lines.count - 4000)")
+}

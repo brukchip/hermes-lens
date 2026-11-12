@@ -444,12 +444,21 @@ final class LunaNativeSession {
         if LunaSelfTest.flag("-LunaCaptureMic") { micCapture = Data() }
         startInjectedSpeech(generation: generation)
         #endif
-        // Peak input level every 5 s: a number only, to tell a silent mic from an unheard one.
+        // Peak input level, sampled every 5 s and logged every 30 s or when the mic goes from
+        // quiet to speech or back (`LunaLevelTrace`): a number only.
         levelTrace = Task { [weak self] in
+            var lastLogged = -Double.infinity
+            var wasSpeech: Bool?
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(LunaLevelTrace.sampleSeconds))
                 guard let self, generation == self.state.generation else { return }
-                self.trace("audio.level", detail: "peak=\(String(format: "%.3f", self.levelPeak))")
+                let now = ProcessInfo.processInfo.systemUptime
+                let speech = LunaLevelTrace.isSpeech(self.levelPeak)
+                if LunaLevelTrace.logs(speech: speech, wasSpeech: wasSpeech, secondsSinceLogged: now - lastLogged) {
+                    self.trace("audio.level", detail: "peak=\(String(format: "%.3f", self.levelPeak))")
+                    lastLogged = now
+                }
+                wasSpeech = speech
                 self.levelPeak = 0
             }
         }

@@ -33,3 +33,18 @@ public enum LunaCallEnding {
     public static let note = "[Update from Luna's phone] This call is about to reach its time limit. Tell the user "
         + "in one short sentence that the call ends in a few seconds and they can start a new call to keep going."
 }
+
+/// The microphone level in the diagnostics log: a number only, to tell a silent mic from
+/// an unheard one. Sampled every 5 s, logged every 30 s or when the mic goes from quiet
+/// to speech or back (every 5 s filled most of the log).
+public enum LunaLevelTrace {
+    public static let sampleSeconds: TimeInterval = 5
+    public static let logSeconds: TimeInterval = 30
+
+    /// A 5-second peak loud enough to be speech (quiet rooms measure about 0.00 to 0.02).
+    public static func isSpeech(_ peak: Double) -> Bool { peak >= 0.05 }
+
+    public static func logs(speech: Bool, wasSpeech: Bool?, secondsSinceLogged: TimeInterval) -> Bool {
+        secondsSinceLogged >= logSeconds || (wasSpeech != nil && wasSpeech != speech)
+    }
+}

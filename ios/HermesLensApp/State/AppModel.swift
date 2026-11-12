@@ -43,8 +43,10 @@ final class AppModel {
     var errorMessage: String?
     var notificationAuthorization: UNAuthorizationStatus = .notDetermined
     var lensConfiguration = HermesLensConfiguration.fallback
-    /// False until a configuration came from the server (now or cached from an earlier run).
-    /// The fallback keeps live voice off, so it must not stand once the server is reachable.
+    /// False until the server's configuration was fetched in this run of the app. A cached
+    /// copy is used meanwhile, but it may come from an older server version (with a feature
+    /// off). Until a fetch succeeds, becoming active and starting a call fetch again, each
+    /// time waiting at most `HermesLensConfiguration.fetchTimeout` before using the cache.
     private(set) var hasServerConfiguration = false
 
     private var hermesClient: any HermesClient
@@ -68,7 +70,6 @@ final class AppModel {
         LunaStorageRoot.resetForUITestRun()
         if let cachedConfiguration = Self.cachedLensConfiguration() {
             lensConfiguration = cachedConfiguration
-            hasServerConfiguration = true
         }
         let snapshot = await persistence.load()
         memories = snapshot.memories.sorted { $0.capturedAt > $1.capturedAt }

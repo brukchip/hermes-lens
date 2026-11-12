@@ -50,6 +50,8 @@ struct HermesClientTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-token")
         #expect(request.value(forHTTPHeaderField: "X-Hermes-Device-Id") == testDeviceID.uuidString)
         #expect(request.value(forHTTPHeaderField: "Idempotency-Key") != nil)
+        // Starting a call can wait on this fetch: short, never the default 60 s.
+        #expect(request.timeoutInterval == HermesLensConfiguration.fetchTimeout)
     }
 
     @Test func healthUsesAuthenticatedRoute() async throws {

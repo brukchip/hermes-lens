@@ -89,6 +89,8 @@ public actor LiveHermesClient: HermesClient {
     public func lensConfiguration() async throws -> HermesLensConfiguration {
         var request = URLRequest(url: configuration.url(path: "v1/lens/config"))
         request.httpMethod = "GET"
+        // Starting a call may wait on this fetch: never for the default 60 s.
+        request.timeoutInterval = HermesLensConfiguration.fetchTimeout
         identify(&request)
         authorize(&request)
         let (data, response) = try await session.data(for: request)

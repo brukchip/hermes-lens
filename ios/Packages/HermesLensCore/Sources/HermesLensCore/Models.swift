@@ -129,6 +129,8 @@ public struct HermesLensConfiguration: Codable, Hashable, Sendable {
 
     /// Used until the server answers: live voice stays off.
     public static let fallback = HermesLensConfiguration()
+    /// The longest the app waits for the server's settings before using its cached copy.
+    public static let fetchTimeout: TimeInterval = 8
 
     /// True when the server offers the native voice protocol this app speaks.
     public var supportsNativeVoice: Bool {
