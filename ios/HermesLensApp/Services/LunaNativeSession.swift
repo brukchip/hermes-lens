@@ -154,6 +154,11 @@ final class LunaNativeSession {
     @ObservationIgnored private var tapFormat: AVAudioFormat?
     @ObservationIgnored private var engineRestarts: [TimeInterval] = []
     @ObservationIgnored private var toolTasks: [String: Task<Void, Never>] = [:]
+    /// The tool calls behind `toolTasks`, by id.
+    @ObservationIgnored private var toolCalls: [String: LunaNativeToolCall] = [:]
+    /// Back-office requests the user talked over: they keep running (and keep their chip)
+    /// instead of being cancelled, and their result comes back as a note or answers a repeat.
+    @ObservationIgnored private var talkedOver = LunaTalkedOverRequests()
     @ObservationIgnored private var inputProbe: NativeInputProbe?
     @ObservationIgnored private var voiceProcessing = false
     @ObservationIgnored private var levelPeak = 0.0
@@ -308,9 +313,14 @@ final class LunaNativeSession {
             for call in calls { startTool(call, generation: generation) }
             return
         case .toolCancellation(let ids):
-            for id in ids { toolTasks.removeValue(forKey: id)?.cancel() }
-            tools.removeAll { ids.contains($0.id) }
-            trace("tool.cancelled", detail: "count=\(ids.count)")
+            // Talking over Luna cancels her tool calls. A look or recording stops; a back-office
+            // request keeps running (its HTTP request stays open, so Hermes is not stopped).
+            let cancelled = talkedOver.cancel(ids, running: toolCalls)
+            for id in cancelled {
+                toolTasks.removeValue(forKey: id)?.cancel(); toolCalls[id] = nil
+            }
+            tools.removeAll { cancelled.contains($0.id) }
+            trace("tool.cancelled", detail: "count=\(ids.count) detached=\(ids.filter { talkedOver.isDetached($0) }.count)")
             return
         default: break
         }
@@ -471,6 +481,11 @@ final class LunaNativeSession {
     /// outcome codes and timings are traced, never the request, image or answer.
     private func startTool(_ call: LunaNativeToolCall, generation: UUID) {
         guard let callID, let socket, toolTasks[call.id] == nil else { return }
+        if talkedOver.adopt(call) != nil {
+            // Asked again for what is still running from before a talk-over: that run answers it.
+            trace("tool.adopted", detail: "name=\(Self.toolLabel(call.name))")
+            return
+        }
         let started = ProcessInfo.processInfo.systemUptime
         let crowded = toolTasks.count >= 4
         trace("tool.requested", detail: "name=\(Self.toolLabel(call.name)) crowded=\(crowded)")
@@ -504,9 +519,19 @@ final class LunaNativeSession {
                 }
             }
             guard !Task.isCancelled, let self, generation == self.state.generation else { return }
-            self.toolTasks[call.id] = nil; self.tools.removeAll { $0.id == call.id }
+            self.toolTasks[call.id] = nil; self.toolCalls[call.id] = nil; self.tools.removeAll { $0.id == call.id }
+            let answering: LunaNativeToolCall
+            switch self.talkedOver.finish(call) {
+            case .note:
+                self.deliverTalkedOver(result, generation: generation)
+                self.trace("tool.detached_result", detail: "name=\(Self.toolLabel(call.name)) "
+                    + "approval=\(result.approval != nil) ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                return
+            case .respond(let target):
+                answering = target
+            }
             do {
-                try await socket.sendMessage(LunaNativeWire.toolResponse(id: call.id, name: call.name,
+                try await socket.sendMessage(LunaNativeWire.toolResponse(id: answering.id, name: answering.name,
                                                                          response: result.response, jpeg: image))
             } catch {
                 guard generation == self.state.generation else { return }
@@ -526,7 +551,35 @@ final class LunaNativeSession {
             }
             self.trace("tool.responded", detail: "name=\(Self.toolLabel(call.name)) outcome=\(outcome) ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
         }
+        toolCalls[call.id] = call
         tools.append(LunaToolActivity(id: call.id, name: call.name, request: call.request))
+    }
+
+    /// A talked-over request finished and nobody waits for it: tell the call. An approval card
+    /// shows as soon as no other card is up (its countdown runs from when it arrived, like the
+    /// server's); the note waits until Luna is listening, for at most a minute.
+    private func deliverTalkedOver(_ result: LunaNativeToolResult, generation: UUID) {
+        guard let note = LunaTalkedOverRequests.note(result: LunaTalkedOverRequests.resultText(result.response),
+                                                     approvalSummary: result.approval?.summary) else { return }
+        let arrived = Date.now
+        Task { [weak self] in
+            let started = ProcessInfo.processInfo.systemUptime
+            var cardShown = false
+            while true {
+                guard let self, generation == self.state.generation,
+                      [.listening, .responding, .speaking].contains(self.state.phase) else { return }
+                if let card = result.approval, !cardShown, self.approval == nil, !self.approvalBusy {
+                    self.approval = card; self.approvalShownAt = arrived; cardShown = true
+                }
+                let cardSettled = result.approval == nil || cardShown
+                if (self.state.phase == .listening && cardSettled)
+                    || ProcessInfo.processInfo.systemUptime - started > 60 { break }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            // Another card stayed up the whole time: this one expires on the server unanswered.
+            guard let self, let socket = self.socket, result.approval == nil || cardShown else { return }
+            try? await socket.sendMessage(LunaNativeWire.text(note))
+        }
     }
 
     private func runLocalTool(_ call: LunaNativeToolCall) async -> (LunaNativeToolResult, Data?, String) {
@@ -1101,7 +1154,9 @@ final class LunaNativeSession {
         if hasTap { engine?.inputNode.removeTap(onBus: 0); hasTap = false }
         thinkingTask?.cancel(); thinkingTask = nil; cuePlayer?.stop()
         player?.stop(); engine?.stop()
-        toolTasks.values.forEach { $0.cancel() }; toolTasks = [:]; tools = []; pendingAsk = nil
+        // The call is over: talked-over requests stop with it.
+        toolTasks.values.forEach { $0.cancel() }; toolTasks = [:]; toolCalls = [:]; tools = []; pendingAsk = nil
+        talkedOver.reset()
         approval = nil; approvalBusy = false; approvalShownAt = nil
         if let localTools { Task { await localTools.endCall() } }
         inputWatchdog?.cancel(); inputWatchdog = nil; inputProbe = nil

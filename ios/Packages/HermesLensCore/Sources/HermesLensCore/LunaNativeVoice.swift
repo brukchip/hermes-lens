@@ -244,7 +244,8 @@ public enum LunaNativeEvent: Equatable, Sendable {
     case usage(input: Int, output: Int), goAway, failure
     /// Gemini asks the back office. Forwarded to the bridge; never executed on the phone.
     case toolCalls([LunaNativeToolCall])
-    /// Gemini abandoned these calls (usually barge-in); their bridge requests are cancelled.
+    /// Gemini abandoned these calls (usually barge-in). Camera tools stop; a back-office
+    /// request keeps running (see `LunaTalkedOverRequests`).
     case toolCancellation([String])
 }
 
