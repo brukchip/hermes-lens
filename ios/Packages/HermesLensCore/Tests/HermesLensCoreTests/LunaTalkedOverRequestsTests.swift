@@ -71,7 +71,7 @@ private extension LunaTalkedOverRequests.Route {
     _ = ledger.cancel(["a"], running: ["a": first])
     #expect(ledger.finish(first, result: result("Booked for 8.")) == .note)
     // The note has not gone out yet: the repeat gets the result, and the note is dropped.
-    #expect(ledger.route(ask("b", "book the table")).answerText == "Booked for 8.")
+    #expect(ledger.route(ask("b", "book the table")).answerText?.contains("earlier request") == true)
     #expect(ledger.takeUndelivered("a") == nil)
     #expect(ledger.isEmpty)
 }
@@ -139,6 +139,22 @@ private extension LunaTalkedOverRequests.Route {
     _ = ledger.cancel(["a"], running: ["a": first])
     #expect(ledger.route(ask("b", "Keep this receipt", photos: true)).busyText == LunaTalkedOverRequests.busyWithoutPhotosAnswer)
     _ = ledger.finish(first, result: result("Kept."))
-    // Finished without photos: the repeat with photos runs on its own.
-    #expect(ledger.route(ask("c", "Keep this receipt", photos: true)).runs)
+    // Finished, note not sent yet: the repeat gets the earlier result, which says to ask again.
+    let answer = ledger.route(ask("c", "Keep this receipt", photos: true)).answerText
+    #expect(answer?.contains("Kept.") == true && answer?.contains("ask again") == true)
+    #expect(ledger.route(ask("d", "Keep this receipt", photos: true)).runs)
+}
+
+@Test func aRewordedReAskAfterTheRunFinishedGetsTheEarlierResultNotASecondRun() throws {
+    var ledger = LunaTalkedOverRequests()
+    let first = ask("a", "Email the report to Sam")
+    _ = ledger.cancel(["a"], running: ["a": first])
+    #expect(ledger.finish(first, result: result("Sent to Sam at 10:02.")) == .note)
+    // The voice model asks again in other words while the note still waits.
+    let text = try #require(ledger.route(ask("b", "Did the report go out to Sam?")).answerText)
+    #expect(text.hasPrefix("This is the result of the user's earlier request"))
+    #expect(text.contains("Sent to Sam at 10:02.") && text.contains("If they still need something else, ask again."))
+    // Delivered: the note is not sent as well, and the next request runs normally.
+    #expect(ledger.takeUndelivered("a") == nil)
+    #expect(ledger.route(ask("c", "Anything else")).runs)
 }

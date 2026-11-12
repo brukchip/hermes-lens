@@ -71,25 +71,34 @@ public struct LunaTalkedOverRequests: Sendable {
     public static let busyWithoutPhotosAnswer = "The user's earlier request is still running, without the "
         + "photos. Tell them you'll share its result when it's back, and to ask again with the photos after that."
 
-    /// Matches the request text, ignoring case and spacing; a run answers at most one repeat.
-    /// While a talked-over request still runs, any other back-office request is answered busy.
+    /// While a talked-over result waits for its note, the next back-office request, however
+    /// it is worded, is answered with that result, marked as the result of the earlier request
+    /// (the voice model often re-asks in other words; running it again would do it twice).
+    /// While a talked-over request still runs, the same request (ignoring case and spacing) is
+    /// adopted by it, once; any other back-office request is answered busy.
     public mutating func route(_ call: LunaNativeToolCall) -> Route {
         guard Self.keepsRunningWhenTalkedOver(call.name) else { return .run }
+        if let id = runs.keys.sorted().first(where: { runs[$0]?.finished != nil }), let finished = runs[id]?.finished {
+            runs[id] = nil  // delivered with this answer: no note follows
+            return .answer(Self.markedAsEarlier(finished), cardSource: .talkedOver)
+        }
         let wanted = call.request.map(Self.normalized)
         if let wanted, let id = runs.keys.sorted().first(where: { runs[$0]?.request == wanted }), let run = runs[id] {
-            if let finished = run.finished, !call.attachesPhotos || run.attachesPhotos {
-                runs[id] = nil
-                return .answer(finished, cardSource: .talkedOver)
-            }
-            if run.finished == nil {
-                // A repeat that adds photos the run does not have cannot be answered by it.
-                if call.attachesPhotos && !run.attachesPhotos { return .busy(Self.busyWithoutPhotosAnswer) }
-                guard adoptedBy[id] == nil else { return .busy(Self.busyAnswer) }
-                adoptedBy[id] = call
-                return .adopt(id)
-            }
+            // A repeat that adds photos the run does not have cannot be answered by it.
+            if call.attachesPhotos && !run.attachesPhotos { return .busy(Self.busyWithoutPhotosAnswer) }
+            guard adoptedBy[id] == nil else { return .busy(Self.busyAnswer) }
+            adoptedBy[id] = call
+            return .adopt(id)
         }
         return isRunning ? .busy(Self.busyAnswer) : .run
+    }
+
+    /// A kept result handed to a later request: clearly the earlier request's result.
+    static func markedAsEarlier(_ result: LunaNativeToolResult) -> LunaNativeToolResult {
+        let text = resultText(result.response).trimmingCharacters(in: .whitespacesAndNewlines)
+        let marked = "This is the result of the user's earlier request, which kept running after they talked "
+            + "over it: \(text.isEmpty ? "done." : text) If they still need something else, ask again."
+        return LunaNativeToolResult(response: LunaNativeWire.toolResult(marked), approval: result.approval)
     }
 
     /// What to do with a finished run's result.
