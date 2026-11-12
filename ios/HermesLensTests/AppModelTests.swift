@@ -318,7 +318,7 @@ import UIKit
     guard case .confirm(let pending) = model.setupPrompt else { Issue.record("Expected a confirmation"); return }
     #expect(pending.server.host() == "lens.example.test")
     #expect(model.settings.bridgeURL != "https://lens.example.test") // nothing saved before Connect
-    await model.answerSetupCode(connect: false)
+    await model.answerSetupCode(pending, connect: false)
     #expect(model.setupPrompt == nil)
     await model.handleOpenURL(try #require(URL(string: "hermeslens://setup?code=HL1-junk")))
     #expect(model.setupPrompt == .invalid)
