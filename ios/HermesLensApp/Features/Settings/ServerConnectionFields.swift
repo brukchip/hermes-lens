@@ -66,7 +66,8 @@ struct ServerConnectionFields: View {
         showConnectionStatus()
     }
 
-    /// Reads the clipboard only on this tap. The code is never logged or shown.
+    /// Reads the clipboard only on this tap. A valid code is applied only after the user
+    /// confirms the server it names. The code is never logged or shown.
     private func pasteSetupCode() async {
         guard let code = UIPasteboard.general.string.flatMap(LunaSetupCode.parse) else {
             VoiceDiagnosticLog.record("setup.code", "result=invalid source=paste")
@@ -74,10 +75,8 @@ struct ServerConnectionFields: View {
             return
         }
         VoiceDiagnosticLog.record("setup.code", "result=ok source=paste")
-        isConnecting = true
-        defer { isConnecting = false }
-        await model.applySetupCode(code)
-        showConnectionStatus()
+        status = nil
+        model.offerSetupCode(code)
     }
 
     private func showConnectionStatus() {
@@ -95,32 +94,32 @@ struct ServerConnectionFields: View {
 }
 
 extension View {
-    /// Asks before a `<scheme>://setup?code=…` link changes Luna's server: it names the host,
-    /// and only Connect saves the address and token. Applied to the app shell and to onboarding
+    /// Asks before a setup code (pasted, or from a `<scheme>://setup?code=…` link) changes
+    /// Luna's server: it names the host and port, and only Connect saves the address and token. Applied to the app shell and to onboarding
     /// (which covers the shell on first run).
-    func setupLinkConfirmation(_ model: AppModel) -> some View {
-        let host: String? = if case .confirm(let code) = model.setupLinkPrompt { code.server.host() } else { nil }
+    func setupCodeConfirmation(_ model: AppModel) -> some View {
+        let host: String? = if case .confirm(let code) = model.setupPrompt { code.displayHost } else { nil }
         return self
             .alert(
                 "Connect Luna to \(host ?? "this server")?",
                 isPresented: Binding(
-                    get: { if case .confirm = model.setupLinkPrompt { true } else { false } },
-                    set: { if !$0, case .confirm = model.setupLinkPrompt { model.setupLinkPrompt = nil } }
+                    get: { if case .confirm = model.setupPrompt { true } else { false } },
+                    set: { if !$0, case .confirm = model.setupPrompt { model.setupPrompt = nil } }
                 )
             ) {
-                Button("Connect") { Task { await model.answerSetupLink(connect: true) } }
-                Button("Cancel", role: .cancel) { Task { await model.answerSetupLink(connect: false) } }
+                Button("Connect") { Task { await model.answerSetupCode(connect: true) } }
+                Button("Cancel", role: .cancel) { Task { await model.answerSetupCode(connect: false) } }
             } message: {
-                Text("This setup link replaces Luna's server address and access token. Connect only if you just ran hermes lens setup on your own server.")
+                Text("This setup code replaces Luna's server address and access token. Connect only if you just ran hermes lens setup on your own server.")
             }
             .alert(
                 "Setup link not valid",
                 isPresented: Binding(
-                    get: { model.setupLinkPrompt == .invalid },
-                    set: { if !$0, model.setupLinkPrompt == .invalid { model.setupLinkPrompt = nil } }
+                    get: { model.setupPrompt == .invalid },
+                    set: { if !$0, model.setupPrompt == .invalid { model.setupPrompt = nil } }
                 )
             ) {
-                Button("OK", role: .cancel) { model.setupLinkPrompt = nil }
+                Button("OK", role: .cancel) { model.setupPrompt = nil }
             } message: {
                 Text(LunaSetupCode.invalidMessage)
             }

@@ -14,6 +14,13 @@ public struct LunaSetupCode: Equatable, Sendable {
     public let token: String
 
     public static let prefix = "HL1-"
+
+    /// The server as the user should check it before connecting: host, and port when given
+    /// ("box.example.net:8443").
+    public var displayHost: String {
+        let host = server.host() ?? server.absoluteString
+        return server.port.map { "\(host):\($0)" } ?? host
+    }
     /// The host of the setup link (`<scheme>://setup?code=…`).
     public static let linkHost = "setup"
     public static let invalidMessage = "That isn't a valid Hermes Lens setup code. Run hermes lens setup on your "
@@ -37,7 +44,7 @@ public struct LunaSetupCode: Equatable, Sendable {
 
     /// The code in a setup link; nil when the link carries none.
     public static func parse(link url: URL) -> LunaSetupCode? {
-        guard isSetupLink(url) else { return nil }
+        guard isSetupLink(url), url.absoluteString.utf8.count <= 4_096 else { return nil }
         return code(in: url).flatMap(decode)
     }
 

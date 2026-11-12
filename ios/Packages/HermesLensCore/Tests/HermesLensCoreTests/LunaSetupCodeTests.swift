@@ -58,6 +58,16 @@ private func code(server: String = "https://lens.example.test", token: String = 
     }
 }
 
+@Test func theConfirmationNamesHostAndPort() throws {
+    #expect(LunaSetupCode.parse(code())?.displayHost == "lens.example.test")
+    #expect(LunaSetupCode.parse(code(server: "https://lens.example.test:8443/base"))?.displayHost == "lens.example.test:8443")
+}
+
+@Test func anOverlongSetupLinkIsRejectedLikeAnOverlongPaste() throws {
+    let link = try #require(URL(string: "hermeslens://setup?code=" + code() + "&pad=" + String(repeating: "x", count: 5_000)))
+    #expect(LunaSetupCode.parse(link: link) == nil)
+}
+
 @Test func onlySetupLinksAreTreatedAsSetup() throws {
     #expect(!LunaSetupCode.isSetupLink(try #require(URL(string: "hermeslens://?metaWearablesAction=register"))))
     #expect(!LunaSetupCode.isSetupLink(try #require(URL(string: "https://setup/?code=x"))))

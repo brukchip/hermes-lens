@@ -722,12 +722,13 @@ final class AppModel {
         (try? await glassesService.requestCameraPermission()) ?? false
     }
 
-    /// A setup link waiting for the user's Connect or Cancel, or a setup link that was invalid.
-    enum SetupLinkPrompt: Equatable {
+    /// A setup code (pasted or from a link) waiting for the user's Connect or Cancel, or a
+    /// setup link that was invalid.
+    enum SetupPrompt: Equatable {
         case confirm(LunaSetupCode)
         case invalid
     }
-    var setupLinkPrompt: SetupLinkPrompt?
+    var setupPrompt: SetupPrompt?
 
     /// Fills in the server address and token from a setup code and connects, the same way as
     /// leaving the server fields (the token goes to Keychain). Never logs the code or token.
@@ -737,11 +738,17 @@ final class AppModel {
         await commitServerFields()
     }
 
-    /// The user tapped Connect (true) or Cancel on a setup link's confirmation.
-    func answerSetupLink(connect: Bool) async {
-        guard case .confirm(let code) = setupLinkPrompt else { setupLinkPrompt = nil; return }
-        setupLinkPrompt = nil
-        VoiceDiagnosticLog.record("setup.link", "result=\(connect ? "connect" : "cancel")")
+    /// A pasted code or a link can come from anywhere (a poisoned clipboard, a stranger's QR
+    /// code): it is never applied without the user confirming the server it names.
+    func offerSetupCode(_ code: LunaSetupCode) {
+        setupPrompt = .confirm(code)
+    }
+
+    /// The user tapped Connect (true) or Cancel on a setup code's confirmation.
+    func answerSetupCode(connect: Bool) async {
+        guard case .confirm(let code) = setupPrompt else { setupPrompt = nil; return }
+        setupPrompt = nil
+        VoiceDiagnosticLog.record("setup.confirm", "result=\(connect ? "connect" : "cancel")")
         if connect { await applySetupCode(code) }
     }
 
@@ -752,7 +759,7 @@ final class AppModel {
         if LunaSetupCode.isSetupLink(url) {
             let code = LunaSetupCode.parse(link: url)
             VoiceDiagnosticLog.record("setup.code", "result=\(code == nil ? "invalid" : "ok") source=link")
-            setupLinkPrompt = code.map { .confirm($0) } ?? .invalid
+            if let code { offerSetupCode(code) } else { setupPrompt = .invalid }
             return
         }
         do {
