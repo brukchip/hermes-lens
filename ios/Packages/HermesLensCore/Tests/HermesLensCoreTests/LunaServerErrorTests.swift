@@ -89,3 +89,30 @@ private func body(_ code: String) -> Data { Data(#"{"error":{"code":"\#(code)"}}
     #expect(LunaNativeVoice.approvalSecondsLeft(shownAt: shown, now: shown.addingTimeInterval(118)) == 0)
     #expect(LunaNativeVoice.approvalSecondsLeft(shownAt: shown, now: shown.addingTimeInterval(500)) == 0)
 }
+
+private func card(detail: String) throws -> LunaNativeToolResult.Approval? {
+    let data = try JSONSerialization.data(withJSONObject: [
+        "response": ["result": "needs approval"],
+        "approval": ["id": UUID().uuidString, "summary": "Send a message to Sam", "detail": detail, "risky": false],
+    ])
+    return try LunaNativeToolResult.decode(data).approval
+}
+
+@Test func approvalDetailIsShownWholeUpToThePluginsLimitWithItsCutMarker() throws {
+    // What voice.detail sends for a long action: 2,000 characters plus its marker.
+    let serverCut = String(repeating: "a", count: 2_000) + " … [3000 more characters not shown. Decline if unsure.]"
+    #expect(try card(detail: serverCut)?.detail == serverCut)
+    let short = "Send a message to Sam: see you at 6"
+    #expect(try card(detail: short)?.detail == short)
+}
+
+@Test func anOverlongDetailIsShortenedButNeverSilently() throws {
+    let plain = String(repeating: "b", count: 5_000)
+    let shortened = try #require(try card(detail: plain)?.detail)
+    #expect(shortened.count == LunaNativeToolResult.Approval.maxDetailCharacters)
+    #expect(shortened.hasSuffix("Decline if unsure.]"))
+    let withMarker = String(repeating: "c", count: 4_000) + " … [99 more characters not shown. Decline if unsure.]"
+    let kept = try #require(try card(detail: withMarker)?.detail)
+    #expect(kept.hasSuffix(" … [99 more characters not shown. Decline if unsure.]"))
+    #expect(kept.count == LunaNativeToolResult.Approval.maxDetailCharacters)
+}

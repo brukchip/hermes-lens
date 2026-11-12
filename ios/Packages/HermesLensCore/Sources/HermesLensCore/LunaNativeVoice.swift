@@ -278,6 +278,22 @@ public struct LunaNativeToolResult: Sendable {
         public init(id: UUID, summary: String, detail: String? = nil, risky: Bool = false) {
             self.id = id; self.summary = summary; self.detail = detail; self.risky = risky
         }
+
+        /// The plugin sends at most 2,000 characters of detail (`voice.detail`) and, when it cut
+        /// more, ends it with " … [N more characters not shown. Decline if unsure.]". The card
+        /// shows all of that. Anything longer is shortened here, always keeping a cut marker.
+        public static let maxDetailCharacters = 2_400
+
+        static func cardDetail(_ text: String) -> String {
+            guard text.count > maxDetailCharacters else { return text }
+            var marker = " … [More not shown. Decline if unsure.]"
+            if text.hasSuffix("]"), let start = text.range(of: " … [", options: .backwards)?.lowerBound,
+               text.distance(from: start, to: text.endIndex) <= 120 {
+                marker = String(text[start...]) // the server's own marker, with its count
+            }
+            let kept = text.prefix(maxDetailCharacters - marker.count)
+            return String(kept).trimmingCharacters(in: .whitespaces) + marker
+        }
     }
     public let response: Data
     public let approval: Approval?
@@ -296,7 +312,7 @@ public struct LunaNativeToolResult: Sendable {
                   let summary = card["summary"] as? String, !summary.isEmpty, summary.count <= 400 else {
                 throw LunaNativeError.invalidResponse
             }
-            let detail = (card["detail"] as? String).flatMap { $0.isEmpty || $0 == summary ? nil : String($0.prefix(600)) }
+            let detail = (card["detail"] as? String).flatMap { $0.isEmpty || $0 == summary ? nil : Approval.cardDetail($0) }
             approval = Approval(id: id, summary: summary, detail: detail, risky: card["risky"] as? Bool ?? false)
         }
         return Self(response: try JSONSerialization.data(withJSONObject: inner), approval: approval)
