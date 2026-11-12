@@ -18,6 +18,14 @@ public enum LunaNativeVoice {
     public static let maxPhotos = 4
     /// Tools the grant declares that run on the phone (glasses camera, contacts), never on the bridge.
     public static let localTools: Set<String> = ["look", "record_video", "save_contact"]
+    /// The plugin denies an unanswered approval card after `APPROVAL_TTL_SECONDS` (120 s).
+    /// Its clock starts a moment before the card reaches the phone, so the app closes it 2 s early.
+    public static let approvalSeconds: TimeInterval = 118
+
+    /// Seconds a card shown at `shownAt` can still be answered (0 once it has expired).
+    public static func approvalSecondsLeft(shownAt: Date, now: Date = .now) -> TimeInterval {
+        max(0, approvalSeconds - now.timeIntervalSince(shownAt))
+    }
     public static let socket = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained"
 }
 
@@ -81,6 +89,8 @@ public enum LunaNativeError: LocalizedError, Sendable {
     case serverUnreachable, microphoneBusy
     /// The microphone delivered pure digital silence, even after the audio was reset.
     case microphoneSilent
+    /// The plugin refused the call (see `init(_: LunaServerError)` for the codes).
+    case wrongToken, providerKeyRefused, providerUnreachable, serverSetup, rateLimited, incompatible, notLensServer
     public var errorDescription: String? {
         switch self {
         case .unavailable: "Live voice is not activated on the server yet."
@@ -93,6 +103,13 @@ public enum LunaNativeError: LocalizedError, Sendable {
         case .serverUnreachable: "Luna's server can't be reached. Check your connection to your Hermes server, then try again."
         case .microphoneBusy: "A phone call, Siri or another app is using the microphone. Try again when it's free."
         case .microphoneSilent: "Luna can't hear the glasses microphone. Try again; if it keeps happening, switch the glasses off and on."
+        case .wrongToken: "Luna's server didn't accept the access token. Check the token in Settings."
+        case .providerKeyRefused: "Google refused the Gemini key on your Hermes server. Run hermes lens setup on the server to enter a working key, then try again."
+        case .providerUnreachable: "Your Hermes server couldn't reach the live voice service. Try again in a moment."
+        case .serverSetup: "Your Hermes server's voice settings aren't supported. Run hermes lens setup on the server, then try again."
+        case .rateLimited: "Luna's server is busy with too many requests. Wait a minute, then try again."
+        case .incompatible: "Luna's server didn't understand this app's request. Update the app and the Hermes Lens plugin."
+        case .notLensServer: "That address doesn't answer like a Hermes Lens server. Check the server address in Settings."
         }
     }
 }
@@ -140,8 +157,9 @@ public actor LunaNativeBrokerClient {
             "callID": callID.uuidString.lowercased(), "id": call.id, "name": call.name, "args": args,
         ] as [String: Any])
         let (data, response) = try await toolSession.data(for: request)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
-            throw LunaNativeError.connection
+        guard let response = response as? HTTPURLResponse else { throw LunaNativeError.connection }
+        guard (200..<300).contains(response.statusCode) else {
+            throw LunaServerError(status: response.statusCode, body: data)
         }
         return try LunaNativeToolResult.decode(data)
     }
@@ -154,8 +172,11 @@ public actor LunaNativeBrokerClient {
         request.setValue(callID.uuidString.lowercased(), forHTTPHeaderField: "X-Call-ID")
         request.timeoutInterval = 30
         let (data, response) = try await toolSession.upload(for: request, from: jpeg)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let response = response as? HTTPURLResponse else { throw LunaNativeError.connection }
+        guard (200..<300).contains(response.statusCode) else {
+            throw LunaServerError(status: response.statusCode, body: data)
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = object["photoID"] as? String, id.utf8.count == 32 else {
             throw LunaNativeError.connection
         }
@@ -173,8 +194,9 @@ public actor LunaNativeBrokerClient {
             "choice": approve ? "approve" : "decline",
         ])
         let (data, response) = try await toolSession.data(for: request)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
-            throw LunaNativeError.connection
+        guard let response = response as? HTTPURLResponse else { throw LunaNativeError.connection }
+        guard (200..<300).contains(response.statusCode) else {
+            throw LunaServerError(status: response.statusCode, body: data)
         }
         return try LunaNativeToolResult.decode(data)
     }
@@ -222,17 +244,10 @@ public actor LunaNativeBrokerClient {
     private func perform(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw LunaNativeError.invalidResponse }
-        switch response.statusCode {
-        case 200..<300: return data
-        case 409: throw LunaNativeError.activeCall
-        case 429: throw LunaNativeError.usageLimit
-        case 503:
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            let error = body?["error"] as? [String: Any]
-            if error?["code"] as? String == "native_voice_unavailable" { throw LunaNativeError.unavailable }
-            throw LunaNativeError.connection
-        default: throw LunaNativeError.connection
+        guard (200..<300).contains(response.statusCode) else {
+            throw LunaNativeError(LunaServerError(status: response.statusCode, body: data))
         }
+        return data
     }
 }
 

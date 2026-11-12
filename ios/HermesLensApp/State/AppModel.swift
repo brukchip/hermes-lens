@@ -27,6 +27,8 @@ final class AppModel {
     var reminders: [ReminderRecord] = []
     var artifacts: [CaptureArtifact] = []
     var connectionState: ConnectionState = .unchecked
+    /// Why the last health or settings check failed (wrong token, unreachable, …); nil when it worked.
+    private(set) var serverProblem: HermesServerProblem?
     var glassesState: GlassesConnectionState = .disconnected
     var glassesRegistrationState: GlassesRegistrationState = .unavailable
     /// Battery, worn, folded and heat as the glasses report them (nil: no glasses known).
@@ -127,11 +129,15 @@ final class AppModel {
         connectionState = .checking
         do {
             let health = try await hermesClient.health()
+            serverProblem = nil
             connectionState = health.isHealthy
                 ? .connected(health.detail)
                 : .offline(health.detail)
         } catch {
-            connectionState = .offline(error.localizedDescription)
+            // A wrong token, an unreachable server and a server that is not Hermes Lens each
+            // get their own message (the token problem used to read as "can't be reached").
+            serverProblem = HermesServerProblem(error)
+            connectionState = .offline(serverProblem?.message ?? error.localizedDescription)
         }
     }
 
@@ -147,6 +153,7 @@ final class AppModel {
         } catch {
             // Keep the last valid configuration (or the fail-safe defaults).
             // A configuration failure must never block voice communication.
+            serverProblem = HermesServerProblem(error) ?? serverProblem
         }
     }
 

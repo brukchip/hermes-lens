@@ -513,7 +513,14 @@ final class LunaNativeSession {
                 }
                 catch {
                     if Task.isCancelled { return } // Cancelled by Gemini; the bridge stops the run.
-                    result = LunaNativeToolResult(response: LunaNativeWire.toolFailure(), approval: nil); outcome = "bridge_error"
+                    if let refused = error as? LunaServerError {
+                        // The server answered with a fixed code: tell Luna what it means (expired
+                        // token, photo too big, call gone), never "not reachable".
+                        result = LunaNativeToolResult(response: LunaNativeWire.toolFailure(refused.spokenFailure), approval: nil)
+                        outcome = "server_\(refused.status)_\(refused.code ?? "none")"
+                    } else {
+                        result = LunaNativeToolResult(response: LunaNativeWire.toolFailure(), approval: nil); outcome = "bridge_error"
+                    }
                 }
             }
             guard !Task.isCancelled, let self, generation == self.state.generation else { return }
@@ -566,7 +573,7 @@ final class LunaNativeSession {
             while true {
                 guard let self, generation == self.state.generation,
                       [.listening, .responding, .speaking].contains(self.state.phase) else { return }
-                if let card = result.approval, !cardShown, self.approval == nil, !self.approvalBusy {
+                if let card = result.approval, !cardShown, !self.hasLiveApproval, !self.approvalBusy {
                     self.approval = card; self.approvalShownAt = arrived; cardShown = true
                 }
                 let cardSettled = result.approval == nil || cardShown
@@ -648,12 +655,30 @@ final class LunaNativeSession {
         name == LunaNativeVoice.toolName || LunaNativeVoice.localTools.contains(name) ? name : "unknown"
     }
 
+    /// A card is up that can still be answered (an expired one stays, disabled, until replaced).
+    private var hasLiveApproval: Bool {
+        guard approval != nil else { return false }
+        guard let shown = approvalShownAt else { return true }
+        return LunaNativeVoice.approvalSecondsLeft(shownAt: shown) > 0
+    }
+
     /// The user's tap on the approval card. The result (or the next card) comes back and
     /// is handed to Luna to say; the voice model itself can never approve.
     func decideApproval(_ approve: Bool) {
         guard let approval, let callID, let socket, !approvalBusy else { return }
-        approvalBusy = true
         let generation = state.generation
+        if let shown = approvalShownAt, LunaNativeVoice.approvalSecondsLeft(shownAt: shown) <= 0 {
+            // The server has already denied it; a tap now would do nothing.
+            self.approval = nil; approvalShownAt = nil
+            trace("approval.expired", detail: "approve=\(approve)")
+            Task {
+                try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's phone] The approval card for: "
+                    + "\(approval.summary) expired before the user tapped it, so nothing was done. Tell them in one short "
+                    + "sentence; they can ask again."))
+            }
+            return
+        }
+        approvalBusy = true
         trace("approval.decided", detail: "approve=\(approve)")
         Task { [weak self, broker] in
             // Speak at once: carrying out the action takes seconds, and silence after a
@@ -662,22 +687,32 @@ final class LunaNativeSession {
                 ? "The user just tapped Approve for: \(approval.summary). It is being carried out now. Say only a very short acknowledgement, such as 'Okay, sending it now.'"
                 : "The user just tapped Decline for: \(approval.summary). Say only a very short acknowledgement, such as 'Okay, I won't.'"
             try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's back office] " + now))
-            let result = try? await broker.decide(callID: callID, approvalID: approval.id, approve: approve)
+            var refused: LunaServerError?
+            let result: LunaNativeToolResult?
+            do { result = try await broker.decide(callID: callID, approvalID: approval.id, approve: approve) }
+            catch { result = nil; refused = error as? LunaServerError }
             guard let self, generation == self.state.generation else { return }
             self.approvalBusy = false
             self.approval = result?.approval
             self.approvalShownAt = result?.approval == nil ? nil : .now
-            var body = ""
-            if let result, let object = try? JSONSerialization.jsonObject(with: result.response) as? [String: Any] {
-                body = (object["result"] as? String) ?? (object["error"] as? String) ?? ""
-            }
-            let note = result == nil
-                ? "The user tapped \(approve ? "Approve" : "Decline"), but the back office could not be reached. Tell them briefly."
-                : "The user tapped \(approve ? "Approve" : "Decline") on their phone. Back office result: \(body) "
+            let body = result.map { LunaTalkedOverRequests.resultText($0.response) } ?? ""
+            let tapped = approve ? "Approve" : "Decline"
+            let note: String
+            if result != nil {
+                note = "The user tapped \(tapped) on their phone. Back office result: \(body) "
                     + "You already acknowledged the tap: now say only the outcome, in one short sentence."
+            } else if refused?.isExpiredApproval == true {
+                note = "The user tapped \(tapped), but the approval had already expired on the server, so nothing was "
+                    + "done. Tell them briefly; they can ask again."
+            } else if let refused {
+                note = "The user tapped \(tapped), but the back office refused it. \(refused.spokenFailure)"
+            } else {
+                note = "The user tapped \(tapped), but the back office could not be reached. Tell them briefly."
+            }
             try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's back office] " + note))
-            self.actions.append(LunaCallAction(summary: approval.summary, approved: approve))
-            self.trace("approval.result", detail: "ok=\(result != nil) next=\(result?.approval != nil)")
+            self.actions.append(LunaCallAction(summary: approval.summary, approved: approve && result != nil))
+            self.trace("approval.result", detail: "ok=\(result != nil) next=\(result?.approval != nil) "
+                + "status=\(refused?.status ?? 0)")
         }
     }
 
@@ -1109,6 +1144,9 @@ final class LunaNativeSession {
     /// Siri or another app holds it or the app is in the background.
     private static func lastingCause(of error: Error, reason: String) -> LunaNativeError? {
         if reason == "audio_interruption" { return .microphoneBusy }
+        // The server refused for a reason only the user or the server's owner can fix
+        // (wrong token, Gemini key refused): no automatic retry.
+        if let native = error as? LunaNativeError, native.isLasting { return native }
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain, [NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed,
                                            NSURLErrorCannotConnectToHost, NSURLErrorNotConnectedToInternet].contains(ns.code) {

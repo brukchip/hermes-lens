@@ -256,7 +256,12 @@ struct SettingsView: View {
     private var lunaStatus: String {
         switch model.connectionState {
         case .connected: "Online"
-        case .offline: "Offline — check your connection"
+        case .offline:
+            switch model.serverProblem {
+            case .wrongToken: "Access token not accepted"
+            case .notLensServer: "Not a Hermes Lens server — check the address"
+            default: "Offline — check your connection"
+            }
         case .checking: "Checking…"
         case .unchecked: "Not checked yet"
         }

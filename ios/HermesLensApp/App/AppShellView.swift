@@ -298,9 +298,10 @@ struct AppShellView: View {
             path = "unavailable"
             call = LunaUnavailableCall(reason: !model.settings.hasServerConfiguration
                 ? "Add your Hermes server address and access token in Settings."
-                : voice.nativeAudioEnabled
-                    ? "Luna can't reach her server. Check the server address and access token in Settings."
-                    : "Luna's live voice is not available from your Hermes server right now.")
+                : model.serverProblem?.message
+                    ?? (voice.nativeAudioEnabled
+                        ? "Luna can't reach her server. Check the server address and access token in Settings."
+                        : "Luna's live voice is not available from your Hermes server right now."))
         }
         // Which path a call took, and the inputs that decided it. No identifiers.
         VoiceDiagnosticLog.record("talk.route", "path=\(path) native_enabled=\(voice.nativeAudioEnabled) "

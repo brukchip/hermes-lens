@@ -29,12 +29,22 @@ struct V3HomeView: View {
                         identifier: "home.service.setup"
                     ) { openTab(.you) }
                 } else if !calls.isActive, isServerOffline {
-                    LunaErrorBanner(
-                        message: "Luna's server can't be reached. Check your connection to your Hermes server, then try again.",
-                        systemImage: "wifi.exclamationmark",
-                        actionTitle: "Try again",
-                        identifier: "home.service.retry"
-                    ) { Task { await model.checkConnection() } }
+                    if model.serverProblem?.needsSettings == true {
+                        // A wrong token or address: the fix is in Settings, not a retry.
+                        LunaErrorBanner(
+                            message: offlineMessage,
+                            systemImage: model.serverProblem == .wrongToken ? "key.slash" : "server.rack",
+                            actionTitle: "Open Settings",
+                            identifier: "home.service.settings"
+                        ) { openTab(.you) }
+                    } else {
+                        LunaErrorBanner(
+                            message: offlineMessage,
+                            systemImage: "wifi.exclamationmark",
+                            actionTitle: "Try again",
+                            identifier: "home.service.retry"
+                        ) { Task { await model.checkConnection() } }
+                    }
                 }
                 presence
                 if let call = calls.call {
@@ -427,6 +437,11 @@ struct V3HomeView: View {
 
     private var needsServerSetup: Bool {
         !model.settings.usesMockHermes && !model.settings.hasServerConfiguration
+    }
+
+    private var offlineMessage: String {
+        if case .offline(let detail) = model.connectionState, !detail.isEmpty { return detail }
+        return HermesServerProblem.unreachable.message
     }
 
     private var isServerOffline: Bool {
