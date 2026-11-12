@@ -123,6 +123,7 @@ private extension LunaTalkedOverRequests.Route {
     let first = ask("a", "Email the report to Sam")
     _ = ledger.cancel(["a"], running: ["a": first])
     #expect(ledger.route(ask("b", "What's the weather?")).busyText == LunaTalkedOverRequests.busyAnswer)
+    #expect(LunaTalkedOverRequests.busyAnswer.contains("Ending the call cancels it."))
     // The identical request is still adopted; a second repeat is busy, not a second run.
     #expect(ledger.route(ask("c", "Email the report to Sam")).adopted == "a")
     #expect(ledger.route(ask("d", "Email the report to Sam")).busyText != nil)

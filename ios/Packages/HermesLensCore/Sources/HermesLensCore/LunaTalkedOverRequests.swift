@@ -67,9 +67,10 @@ public struct LunaTalkedOverRequests: Sendable {
     }
 
     public static let busyAnswer = "The user's earlier request is still running. Tell them you'll share its "
-        + "result when it's back, and to ask this again after that."
+        + "result when it's back, and to ask this again after that. Ending the call cancels it."
     public static let busyWithoutPhotosAnswer = "The user's earlier request is still running, without the "
-        + "photos. Tell them you'll share its result when it's back, and to ask again with the photos after that."
+        + "photos. Tell them you'll share its result when it's back, and to ask again with the photos after that. "
+        + "Ending the call cancels it."
 
     /// While a talked-over result waits for its note, the next back-office request, however
     /// it is worded, is answered with that result, marked as the result of the earlier request
