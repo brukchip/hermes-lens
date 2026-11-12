@@ -82,3 +82,9 @@ private func code(server: String = "https://lens.example.test", token: String = 
     #expect(LunaTokenFieldDecision(field: token, saved: "") == .save)
     #expect(LunaTokenFieldDecision(field: token + "x", saved: token) == .askBeforeReplacing)
 }
+
+@Test func callsUseTheSavedTokenUntilAReplacementIsConfirmed() {
+    #expect(LunaTokenFieldDecision.tokenInUse(field: token + "-edited", saved: token) == token)
+    #expect(LunaTokenFieldDecision.tokenInUse(field: "", saved: token) == token)
+    #expect(LunaTokenFieldDecision.tokenInUse(field: " " + token + "\n", saved: "") == token)
+}

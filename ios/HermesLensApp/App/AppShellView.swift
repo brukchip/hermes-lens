@@ -194,10 +194,11 @@ struct AppShellView: View {
                     case .look: call.ask(Self.lookRequest)
                     case .record: call.ask("The user held the capture button on their glasses. Record a short video now.")
                     case .toggleMute:
-                        // While Luna waits for an OK, a double tap approves it instead of muting:
-                        // the user's own deliberate press, once the card has been visible for 1.5 s,
-                        // and never for a card from a talked-over request (`LunaApprovalGesture`).
-                        if call.approval != nil, call.gestureMayApprove(now: .now) {
+                        // While Luna waits for an OK, a double tap approves it instead of muting, but
+                        // only with the mic on, after Luna has announced the card, once it has been
+                        // visible for 1.5 s, and never for a talked-over request's card
+                        // (`LunaApprovalGesture`). Otherwise the tap mutes or unmutes as usual.
+                        if call.approval != nil, call.approvalGesture(now: .now) == .approves {
                             VoiceDiagnosticLog.record("approval.gesture", "approved")
                             call.decideApproval(true)
                         } else {
@@ -310,7 +311,7 @@ struct AppShellView: View {
         } else if model.lensConfiguration.supportsNativeVoice,
                   let url = URL(string: model.settings.bridgeURL),
                   let configuration = try? HermesEndpointConfiguration(
-                      baseURL: url, token: model.settings.accessToken,
+                      baseURL: url, token: model.settings.tokenInUse,
                       sessionKey: model.settings.sessionKey, deviceID: model.settings.deviceID) {
             path = "native"
             call = LunaNativeSession(coordinator: audioCoordinator, configuration: configuration,

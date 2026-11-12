@@ -98,18 +98,22 @@ extension View {
     /// Luna's server: it names the host and port, and only Connect saves the address and token. Applied to the app shell and to onboarding
     /// (which covers the shell on first run).
     func setupCodeConfirmation(_ model: AppModel) -> some View {
-        let host: String? = if case .confirm(let code) = model.setupPrompt { code.displayHost } else { nil }
+        let pendingCode: LunaSetupCode? = if case .confirm(let code) = model.setupPrompt { code } else { nil }
+        let pendingToken: String? = if case .replaceToken(let token) = model.setupPrompt { token } else { nil }
         return self
+            // Each button acts on the value its alert showed (`presenting:`), never on whatever
+            // the prompt holds at tap time.
             .alert(
-                "Connect Luna to \(host ?? "this server")?",
+                "Connect Luna to \(pendingCode?.displayHost ?? "this server")?",
                 isPresented: Binding(
-                    get: { if case .confirm = model.setupPrompt { true } else { false } },
+                    get: { pendingCode != nil },
                     set: { if !$0, case .confirm = model.setupPrompt { model.setupPrompt = nil } }
-                )
-            ) {
-                Button("Connect") { Task { await model.answerSetupCode(connect: true) } }
-                Button("Cancel", role: .cancel) { Task { await model.answerSetupCode(connect: false) } }
-            } message: {
+                ),
+                presenting: pendingCode
+            ) { code in
+                Button("Connect") { Task { await model.answerSetupCode(code, connect: true) } }
+                Button("Cancel", role: .cancel) { Task { await model.answerSetupCode(code, connect: false) } }
+            } message: { _ in
                 Text("This setup code replaces Luna's server address and access token. Connect only if you just ran hermes lens setup on your own server.")
             }
             .alert(
@@ -126,13 +130,14 @@ extension View {
             .alert(
                 "Replace the saved access token?",
                 isPresented: Binding(
-                    get: { model.setupPrompt == .replaceToken },
-                    set: { if !$0, model.setupPrompt == .replaceToken { Task { await model.answerTokenReplacement(replace: false) } } }
-                )
-            ) {
-                Button("Replace") { Task { await model.answerTokenReplacement(replace: true) } }
-                Button("Keep saved token", role: .cancel) { Task { await model.answerTokenReplacement(replace: false) } }
-            } message: {
+                    get: { pendingToken != nil },
+                    set: { if !$0, case .replaceToken = model.setupPrompt { model.setupPrompt = nil } }
+                ),
+                presenting: pendingToken
+            ) { token in
+                Button("Replace") { Task { await model.answerTokenReplacement(token, replace: true) } }
+                Button("Keep saved token", role: .cancel) { Task { await model.answerTokenReplacement(token, replace: false) } }
+            } message: { _ in
                 Text("You typed a different access token. Luna uses the saved one until you replace it.")
             }
     }

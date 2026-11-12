@@ -130,3 +130,35 @@ private let pcm = Data(repeating: 12, count: 960)
     log.luna("Sure.")
     #expect(log.entries.map(\.text) == ["Hi", "Hello!", "One more thing about tomorrow", "Sure."])
 }
+
+@Test func lateWordsJoinOnlyTheQuestionOfThisTurn() {
+    // Luna speaks first (no question this turn): words during her answer are kept, not lost.
+    var first = LunaTranscriptLog()
+    first.luna("Hi, I'm Luna.")
+    first.user(" Hello")
+    first.luna(" How can I help?")
+    first.turnEnded()
+    #expect(first.entries.map(\.text) == ["Hello", "Hi, I'm Luna. How can I help?"])
+    // An update after an earlier turn: late words never join the older turn's question.
+    var later = LunaTranscriptLog()
+    later.user("What's the time?"); later.luna("Three."); later.turnEnded()
+    later.luna("Your report is ready.")
+    later.user(" thanks")
+    later.luna(" It's in your inbox.")
+    later.turnEnded()
+    #expect(later.entries.map(\.text) == ["What's the time?", "Three.", "thanks", "Your report is ready. It's in your inbox."])
+}
+
+@Test func aQuestionStaysBelowTheOldAnswerWhenItsTurnEndsWithoutAReply() {
+    var state = LunaNativeCallState()
+    state.begin(); state.connected()
+    let id = state.generation
+    state.receive(.inputTranscript("What time is it?"), generation: id)
+    state.receive(.outputTranscript("Three."), generation: id)
+    state.receive(.turnComplete, generation: id)
+    state.receive(.inputTranscript("Check my calendar"), generation: id)
+    // The model answers with a tool call only: the turn completes with no speech.
+    state.receive(.turnComplete, generation: id)
+    #expect(state.heard == "Check my calendar" && state.transcript == "Three.")
+    #expect(state.heardIsLatest)
+}

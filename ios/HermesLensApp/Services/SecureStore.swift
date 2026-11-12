@@ -16,11 +16,19 @@ struct SecureStore: Sendable {
             kSecAttrAccount as String: account,
         ]
 
-        SecItemDelete(query as CFDictionary)
+        // Update in place, so a failed write never erases the value already stored; add only
+        // when there is none yet.
+        let update: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let updated = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw SecureStoreError.unhandledStatus(updated) }
+
         var insert = query
         insert[kSecValueData as String] = data
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-
         let status = SecItemAdd(insert as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw SecureStoreError.unhandledStatus(status)

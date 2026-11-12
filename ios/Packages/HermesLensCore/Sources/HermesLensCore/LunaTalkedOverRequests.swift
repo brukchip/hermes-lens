@@ -58,7 +58,8 @@ public struct LunaTalkedOverRequests: Sendable {
         /// this call when it finishes.
         case adopt(String)
         /// The same request already finished while talked over: answer with this result now.
-        case answer(LunaNativeToolResult)
+        /// A card in it is shown with `cardSource` (always button-only).
+        case answer(LunaNativeToolResult, cardSource: LunaApprovalSlot.Source)
         /// A talked-over request still runs (the server works on one request per chat at a
         /// time, so another would queue behind it and time out): answer on the phone at once
         /// with this text, without asking the server.
@@ -66,56 +67,75 @@ public struct LunaTalkedOverRequests: Sendable {
     }
 
     public static let busyAnswer = "The user's earlier request is still running. Tell them you'll share its "
-        + "result when it's back, and to ask this again after that."
+        + "result when it's back, and to ask this again after that. Ending the call cancels it."
     public static let busyWithoutPhotosAnswer = "The user's earlier request is still running, without the "
-        + "photos. Tell them you'll share its result when it's back, and to ask again with the photos after that."
+        + "photos. Tell them you'll share its result when it's back, and to ask again with the photos after that. "
+        + "Ending the call cancels it."
 
-    /// Matches the request text, ignoring case and spacing; a run answers at most one repeat.
-    /// While a talked-over request still runs, any other back-office request is answered busy.
+    /// While a talked-over result waits for its note, the next back-office request, however
+    /// it is worded, is answered with that result, marked as the result of the earlier request
+    /// (the voice model often re-asks in other words; running it again would do it twice).
+    /// While a talked-over request still runs, the same request (ignoring case and spacing) is
+    /// adopted by it, once; any other back-office request is answered busy.
     public mutating func route(_ call: LunaNativeToolCall) -> Route {
         guard Self.keepsRunningWhenTalkedOver(call.name) else { return .run }
+        if let id = runs.keys.sorted().first(where: { runs[$0]?.finished != nil }), let finished = runs[id]?.finished {
+            runs[id] = nil  // delivered with this answer: no note follows
+            return .answer(Self.markedAsEarlier(finished), cardSource: .talkedOver)
+        }
         let wanted = call.request.map(Self.normalized)
         if let wanted, let id = runs.keys.sorted().first(where: { runs[$0]?.request == wanted }), let run = runs[id] {
-            if let finished = run.finished, !call.attachesPhotos || run.attachesPhotos {
-                runs[id] = nil
-                return .answer(finished)
-            }
-            if run.finished == nil {
-                // A repeat that adds photos the run does not have cannot be answered by it.
-                if call.attachesPhotos && !run.attachesPhotos { return .busy(Self.busyWithoutPhotosAnswer) }
-                guard adoptedBy[id] == nil else { return .busy(Self.busyAnswer) }
-                adoptedBy[id] = call
-                return .adopt(id)
-            }
+            // A repeat that adds photos the run does not have cannot be answered by it.
+            if call.attachesPhotos && !run.attachesPhotos { return .busy(Self.busyWithoutPhotosAnswer) }
+            guard adoptedBy[id] == nil else { return .busy(Self.busyAnswer) }
+            adoptedBy[id] = call
+            return .adopt(id)
         }
         return isRunning ? .busy(Self.busyAnswer) : .run
     }
 
+    /// A kept result handed to a later request: clearly the earlier request's result.
+    static func markedAsEarlier(_ result: LunaNativeToolResult) -> LunaNativeToolResult {
+        let text = resultText(result.response).trimmingCharacters(in: .whitespacesAndNewlines)
+        let marked = "This is the result of the user's earlier request, which kept running after they talked "
+            + "over it: \(text.isEmpty ? "done." : text) If they still need something else, ask again."
+        return LunaNativeToolResult(response: LunaNativeWire.toolResult(marked), approval: result.approval)
+    }
+
     /// What to do with a finished run's result.
     public enum Delivery: Equatable, Sendable {
-        /// Answer this tool call (the original one, or the repeat that adopted the run).
-        case respond(LunaNativeToolCall)
+        /// Answer this tool call (the original one, or the repeat that adopted the run). A card
+        /// in the result is shown with `cardSource`: a run that was talked over is button-only
+        /// even when a repeat it answered is waiting for it.
+        case respond(LunaNativeToolCall, cardSource: LunaApprovalSlot.Source)
         /// Nobody waits for it: tell the call in a note (`takeUndelivered` when sending it).
         case note
     }
 
     /// The run for `call` finished with `result`.
     public mutating func finish(_ call: LunaNativeToolCall, result: LunaNativeToolResult) -> Delivery {
-        guard runs[call.id] != nil else { return .respond(call) }
+        guard runs[call.id] != nil else { return .respond(call, cardSource: .answer) }
         if let repeated = adoptedBy.removeValue(forKey: call.id) {
             runs[call.id] = nil
-            return .respond(repeated)
+            return .respond(repeated, cardSource: .talkedOver)
         }
         runs[call.id]?.finished = result
         return .note
     }
 
+    /// A finished talked-over result taken for delivery, and how a card in it is shown.
+    public struct Kept: Sendable {
+        public let result: LunaNativeToolResult
+        /// Always `.talkedOver`: button-only.
+        public let cardSource: LunaApprovalSlot.Source
+    }
+
     /// The finished result of a talked-over run that no repeat has taken yet, removed from
     /// the ledger. nil when a repeat was already answered with it.
-    public mutating func takeUndelivered(_ id: String) -> LunaNativeToolResult? {
+    public mutating func takeUndelivered(_ id: String) -> Kept? {
         guard let finished = runs[id]?.finished else { return nil }
         runs[id] = nil
-        return finished
+        return Kept(result: finished, cardSource: .talkedOver)
     }
 
     public func isDetached(_ id: String) -> Bool { runs[id] != nil }

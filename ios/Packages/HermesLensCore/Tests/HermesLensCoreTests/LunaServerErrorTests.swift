@@ -34,6 +34,7 @@ private func body(_ code: String) -> Data { Data(#"{"error":{"code":"\#(code)"}}
         #expect(error.errorDescription?.isEmpty == false)
     }
     #expect(LunaNativeError.providerKeyRefused.errorDescription?.contains("hermes lens setup") == true)
+    #expect(LunaNativeError.providerKeyRefused.errorDescription?.contains("key and model") == true)
     #expect(LunaNativeError.wrongToken.errorDescription?.contains("token") == true)
     #expect(LunaNativeError.wrongToken.errorDescription != LunaNativeError.serverUnreachable.errorDescription)
 }

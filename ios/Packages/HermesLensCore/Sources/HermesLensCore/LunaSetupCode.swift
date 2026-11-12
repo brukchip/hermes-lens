@@ -87,6 +87,13 @@ public enum LunaTokenFieldDecision: Equatable, Sendable {
     /// A different token would replace the saved one: ask first.
     case askBeforeReplacing
 
+    /// The token calls and server checks use. Once a token is saved, it is the saved one
+    /// until a different typed token is confirmed (Replace) or saved explicitly; before any
+    /// token is saved, the typed one.
+    public static func tokenInUse(field: String, saved: String) -> String {
+        saved.isEmpty ? field.trimmingCharacters(in: .whitespacesAndNewlines) : saved
+    }
+
     /// `field` is the trimmed text in the field, `saved` the token in Keychain.
     public init(field: String, saved: String) {
         if field == saved { self = .keep }

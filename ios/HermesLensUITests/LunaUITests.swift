@@ -78,7 +78,7 @@ final class LunaUITests: XCTestCase {
         let app = launch(extra: ["-LunaDemoScript", "approval"])
         app.element("home.talk").waitAndTap()
         XCTAssertTrue(app.element("call.approval").waitForExistence(timeout: 6))
-        XCTAssertTrue(app.staticTexts["Nothing happens unless you tap Approve."].exists)
+        XCTAssertTrue(app.staticTexts["Nothing happens unless you tap Approve or double-tap your glasses."].exists)
         app.element("call.approval.decline").tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'cancelled'")).firstMatch
             .waitForExistence(timeout: 3))

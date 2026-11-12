@@ -96,24 +96,25 @@ final class AppModel {
         case .save:
             guard saveTokenToKeychain() else { return }
         case .askBeforeReplacing:
-            setupPrompt = .replaceToken
+            setupPrompt = .replaceToken(settings.accessToken)
             return
         }
-        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.accessToken else { return }
+        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.tokenInUse else { return }
         rebuildServices()
         await refreshReadiness()
     }
 
-    /// The user answered "Replace the saved access token?".
-    func answerTokenReplacement(replace: Bool) async {
-        guard setupPrompt == .replaceToken else { return }
-        setupPrompt = nil
+    /// The user answered "Replace the saved access token?" for `token`, the token the alert
+    /// was shown for (not whatever the field holds by the time of the tap).
+    func answerTokenReplacement(_ token: String, replace: Bool) async {
+        if setupPrompt == .replaceToken(token) { setupPrompt = nil }
         if replace {
+            settings.accessToken = token
             guard saveTokenToKeychain() else { return }
         } else {
             settings.restoreSavedAccessToken()
         }
-        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.accessToken else { return }
+        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.tokenInUse else { return }
         rebuildServices()
         await refreshReadiness()
     }
@@ -132,7 +133,7 @@ final class AppModel {
     func rebuildServices() {
         endpointProblem = nil
         servicesEndpoint = settings.bridgeURL
-        servicesToken = settings.accessToken
+        servicesToken = settings.tokenInUse
         if settings.usesMockHermes {
             hermesClient = MockHermesClient()
         } else {
@@ -140,7 +141,7 @@ final class AppModel {
                 guard let url = URL(string: settings.bridgeURL) else { throw HermesClientError.invalidBaseURL }
                 let configuration = try HermesEndpointConfiguration(
                     baseURL: url,
-                    token: settings.accessToken,
+                    token: settings.tokenInUse,
                     sessionKey: settings.sessionKey,
                     deviceID: settings.deviceID
                 )
@@ -755,8 +756,8 @@ final class AppModel {
     enum SetupPrompt: Equatable {
         case confirm(LunaSetupCode)
         case invalid
-        /// A different access token was typed over the saved one.
-        case replaceToken
+        /// A different access token was typed over the saved one (memory only, never logged).
+        case replaceToken(String)
     }
     var setupPrompt: SetupPrompt?
 
@@ -779,9 +780,9 @@ final class AppModel {
     }
 
     /// The user tapped Connect (true) or Cancel on a setup code's confirmation.
-    func answerSetupCode(connect: Bool) async {
-        guard case .confirm(let code) = setupPrompt else { setupPrompt = nil; return }
-        setupPrompt = nil
+    /// `code` is the one the alert showed, not whatever the prompt holds at tap time.
+    func answerSetupCode(_ code: LunaSetupCode, connect: Bool) async {
+        if setupPrompt == .confirm(code) { setupPrompt = nil }
         VoiceDiagnosticLog.record("setup.confirm", "result=\(connect ? "connect" : "cancel")")
         if connect { await applySetupCode(code) }
     }

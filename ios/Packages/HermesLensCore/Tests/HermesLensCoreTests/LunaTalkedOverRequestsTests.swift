@@ -14,7 +14,10 @@ private func result(_ text: String) -> LunaNativeToolResult {
 private extension LunaTalkedOverRequests.Route {
     var adopted: String? { if case .adopt(let id) = self { id } else { nil } }
     var answerText: String? {
-        if case .answer(let result) = self { LunaTalkedOverRequests.resultText(result.response) } else { nil }
+        if case .answer(let result, _) = self { LunaTalkedOverRequests.resultText(result.response) } else { nil }
+    }
+    var answerCardSource: LunaApprovalSlot.Source? {
+        if case .answer(_, let source) = self { source } else { nil }
     }
     var runs: Bool { if case .run = self { true } else { false } }
     var busyText: String? { if case .busy(let text) = self { text } else { nil } }
@@ -40,12 +43,13 @@ private extension LunaTalkedOverRequests.Route {
     #expect(ledger.finish(call, result: result("Sent.")) == .note)
     #expect(!ledger.isRunning && ledger.isDetached("a"))
     let taken = ledger.takeUndelivered("a")
-    #expect(taken.map { LunaTalkedOverRequests.resultText($0.response) } == "Sent.")
+    #expect(taken.map { LunaTalkedOverRequests.resultText($0.result.response) } == "Sent.")
+    #expect(taken?.cardSource == .talkedOver) // its card is button-only
     #expect(ledger.takeUndelivered("a") == nil)
     #expect(ledger.isEmpty)
     // A call that was never talked over answers itself.
     let other = ask("b", "Anything")
-    #expect(ledger.finish(other, result: result("x")) == .respond(other))
+    #expect(ledger.finish(other, result: result("x")) == .respond(other, cardSource: .answer))
 }
 
 @Test func aRepeatWhileTheRequestRunsIsAnsweredByThatRun() {
@@ -56,7 +60,8 @@ private extension LunaTalkedOverRequests.Route {
     let repeated = ask("b", "what's on my calendar today?")
     #expect(ledger.route(repeated).adopted == "a")
     #expect(ledger.waitingRepeats == 1)
-    #expect(ledger.finish(first, result: result("Two meetings.")) == .respond(repeated))
+    // The run was talked over: a card in its result is button-only, even though a repeat waits.
+    #expect(ledger.finish(first, result: result("Two meetings.")) == .respond(repeated, cardSource: .talkedOver))
     #expect(ledger.isEmpty)
 }
 
@@ -66,9 +71,17 @@ private extension LunaTalkedOverRequests.Route {
     _ = ledger.cancel(["a"], running: ["a": first])
     #expect(ledger.finish(first, result: result("Booked for 8.")) == .note)
     // The note has not gone out yet: the repeat gets the result, and the note is dropped.
-    #expect(ledger.route(ask("b", "book the table")).answerText == "Booked for 8.")
+    #expect(ledger.route(ask("b", "book the table")).answerText?.contains("earlier request") == true)
     #expect(ledger.takeUndelivered("a") == nil)
     #expect(ledger.isEmpty)
+}
+
+@Test func aKeptResultsCardIsButtonOnlyWhenARepeatTakesIt() {
+    var ledger = LunaTalkedOverRequests()
+    let first = ask("a", "Send it")
+    _ = ledger.cancel(["a"], running: ["a": first])
+    _ = ledger.finish(first, result: result("x"))
+    #expect(ledger.route(ask("b", "Send it")).answerCardSource == .talkedOver)
 }
 
 @Test func aCancelledRepeatHandsTheResultBackToANote() {
@@ -110,6 +123,7 @@ private extension LunaTalkedOverRequests.Route {
     let first = ask("a", "Email the report to Sam")
     _ = ledger.cancel(["a"], running: ["a": first])
     #expect(ledger.route(ask("b", "What's the weather?")).busyText == LunaTalkedOverRequests.busyAnswer)
+    #expect(LunaTalkedOverRequests.busyAnswer.contains("Ending the call cancels it."))
     // The identical request is still adopted; a second repeat is busy, not a second run.
     #expect(ledger.route(ask("c", "Email the report to Sam")).adopted == "a")
     #expect(ledger.route(ask("d", "Email the report to Sam")).busyText != nil)
@@ -126,6 +140,22 @@ private extension LunaTalkedOverRequests.Route {
     _ = ledger.cancel(["a"], running: ["a": first])
     #expect(ledger.route(ask("b", "Keep this receipt", photos: true)).busyText == LunaTalkedOverRequests.busyWithoutPhotosAnswer)
     _ = ledger.finish(first, result: result("Kept."))
-    // Finished without photos: the repeat with photos runs on its own.
-    #expect(ledger.route(ask("c", "Keep this receipt", photos: true)).runs)
+    // Finished, note not sent yet: the repeat gets the earlier result, which says to ask again.
+    let answer = ledger.route(ask("c", "Keep this receipt", photos: true)).answerText
+    #expect(answer?.contains("Kept.") == true && answer?.contains("ask again") == true)
+    #expect(ledger.route(ask("d", "Keep this receipt", photos: true)).runs)
+}
+
+@Test func aRewordedReAskAfterTheRunFinishedGetsTheEarlierResultNotASecondRun() throws {
+    var ledger = LunaTalkedOverRequests()
+    let first = ask("a", "Email the report to Sam")
+    _ = ledger.cancel(["a"], running: ["a": first])
+    #expect(ledger.finish(first, result: result("Sent to Sam at 10:02.")) == .note)
+    // The voice model asks again in other words while the note still waits.
+    let text = try #require(ledger.route(ask("b", "Did the report go out to Sam?")).answerText)
+    #expect(text.hasPrefix("This is the result of the user's earlier request"))
+    #expect(text.contains("Sent to Sam at 10:02.") && text.contains("If they still need something else, ask again."))
+    // Delivered: the note is not sent as well, and the next request runs normally.
+    #expect(ledger.takeUndelivered("a") == nil)
+    #expect(ledger.route(ask("c", "Anything else")).runs)
 }

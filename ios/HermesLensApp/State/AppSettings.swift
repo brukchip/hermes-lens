@@ -94,13 +94,17 @@ final class AppSettings {
         LunaTokenFieldDecision(field: accessToken, saved: savedAccessToken)
     }
 
+    /// The token calls and server checks use: the saved one until a different typed token is
+    /// confirmed or saved (`LunaTokenFieldDecision.tokenInUse`).
+    var tokenInUse: String { LunaTokenFieldDecision.tokenInUse(field: accessToken, saved: savedAccessToken) }
+
     /// Puts the Keychain token back into the field.
     func restoreSavedAccessToken() { accessToken = savedAccessToken }
 
     /// True once a server address and an access token are both entered.
     var hasServerConfiguration: Bool {
         !bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !tokenInUse.isEmpty
     }
 
     func saveAccessToken() throws {
