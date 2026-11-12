@@ -1,19 +1,25 @@
 import Foundation
 
 /// The soft "still working" tone while Luna's back office works and nobody is talking.
-/// It used to repeat every 2.5 s for as long as the work ran; now it backs off: once
-/// after 1.5 s of quiet, then every 10 s, and not at all after a minute of quiet.
+/// It used to repeat every 2.5 s for as long as the work ran; now it backs off, timed from
+/// when the work started: at 1.5 s, then every 10 s, and never after a minute. Each tone
+/// waits for a quiet moment (1.5 s without speech either way); a slot missed because
+/// someone was talking plays once it is quiet, but never more than one tone per slot.
 public enum LunaWorkingTone {
     public static let firstAfter: TimeInterval = 1.5
     public static let interval: TimeInterval = 10
     public static let stopAfter: TimeInterval = 60
+    public static let quietNeeded: TimeInterval = 1.5
 
-    /// Seconds of quiet at which the tone plays: 1.5, 11.5, 21.5, 31.5, 41.5, 51.5.
+    /// Seconds into the work at which a tone is due: 1.5, 11.5, 21.5, 31.5, 41.5, 51.5.
     public static let times: [TimeInterval] = Array(stride(from: firstAfter, to: stopAfter, by: interval))
 
-    /// True when a tone is due between two readings of the quiet time, `(previous, now]`.
-    public static func plays(from previous: TimeInterval, to now: TimeInterval) -> Bool {
-        times.contains { $0 > previous && $0 <= now }
+    /// The slot to play now (an index into `times`), or nil. `lastPlayed` is the slot of the
+    /// last tone for this work.
+    public static func due(workingFor: TimeInterval, quietFor: TimeInterval, lastPlayed: Int?) -> Int? {
+        guard workingFor < stopAfter, quietFor >= quietNeeded,
+              let slot = times.lastIndex(where: { $0 <= workingFor }), slot > (lastPlayed ?? -1) else { return nil }
+        return slot
     }
 }
 

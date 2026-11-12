@@ -2,19 +2,28 @@ import Foundation
 import Testing
 @testable import HermesLensCore
 
-@Test func theWorkingToneBacksOffAndStopsAfterAMinute() {
+@Test func theWorkingToneBacksOffAndStopsAMinuteAfterTheRequestStarted() {
     #expect(LunaWorkingTone.times == [1.5, 11.5, 21.5, 31.5, 41.5, 51.5])
-    // The session reads the quiet time every half second.
-    var played: [TimeInterval] = []
-    var previous = 0.0
-    for tick in 1...240 {
-        let quiet = Double(tick) * 0.5
-        if LunaWorkingTone.plays(from: previous, to: quiet) { played.append(quiet) }
-        previous = quiet
+    // Read every half second; quiet the whole time.
+    func run(talkingBetween talk: ClosedRange<Double>? = nil) -> [Double] {
+        var played: [Double] = []
+        var last: Int?
+        var quiet = 0.0
+        for tick in 1...240 {
+            let working = Double(tick) * 0.5
+            quiet = talk?.contains(working) == true ? 0 : quiet + 0.5
+            if let slot = LunaWorkingTone.due(workingFor: working, quietFor: quiet, lastPlayed: last) {
+                played.append(working); last = slot
+            }
+        }
+        return played
     }
-    #expect(played == [1.5, 11.5, 21.5, 31.5, 41.5, 51.5])
-    #expect(!LunaWorkingTone.plays(from: 0, to: 1))
-    #expect(!LunaWorkingTone.plays(from: 52, to: 600))
+    #expect(run() == [1.5, 11.5, 21.5, 31.5, 41.5, 51.5])
+    // Talk from 10 s to 25 s: the missed 11.5 and 21.5 slots give one tone once it has been
+    // quiet for 1.5 s; the minute still counts from the start of the request.
+    #expect(run(talkingBetween: 10...25) == [1.5, 26.5, 31.5, 41.5, 51.5])
+    #expect(LunaWorkingTone.due(workingFor: 61, quietFor: 30, lastPlayed: nil) == nil)
+    #expect(LunaWorkingTone.due(workingFor: 1, quietFor: 30, lastPlayed: nil) == nil)
 }
 
 @Test func lunaWarnsOnceBeforeTheCallLimitWhenThereIsTimeToSaySo() {

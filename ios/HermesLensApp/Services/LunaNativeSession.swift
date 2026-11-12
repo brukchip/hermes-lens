@@ -1053,8 +1053,9 @@ final class LunaNativeSession {
 
     /// True while Luna's back office is working for the user: a delegated request or an
     /// approved action. Local look/record have their own on-screen progress.
+    /// A talked-over request does not count: the conversation has moved on to other things.
     private var backOfficeWorking: Bool {
-        approvalBusy || tools.contains { !LunaNativeVoice.localTools.contains($0.name) }
+        approvalBusy || tools.contains { !LunaNativeVoice.localTools.contains($0.name) && !talkedOver.isDetached($0.id) }
     }
 
     /// A soft cue on the glasses while the back office works and nobody is talking: first
@@ -1064,20 +1065,25 @@ final class LunaNativeSession {
         thinkingTask?.cancel()
         thinkingTask = Task { [weak self] in
             var quietFor = 0.0
+            var workStarted: TimeInterval?
+            var lastSlot: Int?
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, generation == self.state.generation else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                guard self.backOfficeWorking, ![.idle, .connecting, .failed, .ended].contains(self.state.phase) else {
+                    workStarted = nil; lastSlot = nil; quietFor = 0; continue
+                }
+                if workStarted == nil { workStarted = now }
                 // Quiet means no speech either way, measured from the audio itself: while a
                 // delegated request runs, the call phase stays `.speaking` after Luna's
                 // "let me check" (self-test, 2026-10-31).
-                let now = ProcessInfo.processInfo.systemUptime
                 let quiet = now > self.speechPlaysUntil + 0.3 && now - self.lastSpeechAt > 1
-                guard self.backOfficeWorking, quiet, ![.idle, .connecting, .failed, .ended].contains(self.state.phase)
-                else { quietFor = 0; continue }
-                let before = quietFor
-                quietFor += 0.5
-                if LunaWorkingTone.plays(from: before, to: quietFor) {
-                    if before < LunaWorkingTone.firstAfter { self.trace("thinking.cue") }
+                quietFor = quiet ? quietFor + 0.5 : 0
+                if let start = workStarted,
+                   let slot = LunaWorkingTone.due(workingFor: now - start, quietFor: quietFor, lastPlayed: lastSlot) {
+                    if lastSlot == nil { self.trace("thinking.cue") }
+                    lastSlot = slot
                     self.playThinkingCue()
                 }
             }
