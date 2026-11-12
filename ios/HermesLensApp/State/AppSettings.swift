@@ -1,4 +1,5 @@
 import Foundation
+import HermesLensCore
 import Observation
 
 @MainActor
@@ -87,6 +88,14 @@ final class AppSettings {
 
     /// The token field differs from what Keychain holds.
     var hasUnsavedAccessToken: Bool { accessToken != savedAccessToken }
+
+    /// What leaving the token field should do (`LunaTokenFieldDecision`).
+    var tokenFieldDecision: LunaTokenFieldDecision {
+        LunaTokenFieldDecision(field: accessToken, saved: savedAccessToken)
+    }
+
+    /// Puts the Keychain token back into the field.
+    func restoreSavedAccessToken() { accessToken = savedAccessToken }
 
     /// True once a server address and an access token are both entered.
     var hasServerConfiguration: Bool {

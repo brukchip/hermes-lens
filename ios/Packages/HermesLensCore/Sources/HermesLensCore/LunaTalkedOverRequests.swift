@@ -5,14 +5,23 @@ import Foundation
 /// Talking over Luna makes the voice model cancel the tool calls in flight. A look or a
 /// recording is quick and simply stops, but an `ask_luna` request keeps running: the
 /// user usually still wants it, and hanging up its HTTP request would make the plugin
-/// stop the Hermes run. When a detached request finishes, its result goes into the call
-/// as a short note. If the voice model asks again for the same request while it still
-/// runs, the new tool call is answered with that run's result instead of a second run.
+/// stop the Hermes run. The voice model is told at once that the request continues. When
+/// it finishes, its result is kept here until a note carrying it has been sent into the
+/// call; if the voice model asks again for the same request meanwhile, the repeat is
+/// answered from the same run (still running: it waits for it; finished: at once).
 ///
 /// Pure bookkeeping: the session owns the tasks and the socket, this decides.
-public struct LunaTalkedOverRequests: Equatable, Sendable {
-    /// Detached tool call id → its request text, normalised (nil when it had none).
-    private var detached: [String: String?] = [:]
+public struct LunaTalkedOverRequests: Sendable {
+    private struct Run: Sendable {
+        /// Normalised request text (nil when the call had none).
+        let request: String?
+        let attachesPhotos: Bool
+        /// Set once the run finished; cleared when its note is sent or a repeat takes it.
+        var finished: LunaNativeToolResult?
+    }
+
+    /// Detached tool call id → its run.
+    private var runs: [String: Run] = [:]
     /// Detached tool call id → the repeated tool call waiting for that run's result.
     private var adoptedBy: [String: LunaNativeToolCall] = [:]
 
@@ -33,7 +42,7 @@ public struct LunaTalkedOverRequests: Equatable, Sendable {
             for (run, repeated) in adoptedBy where repeated.id == id { adoptedBy[run] = nil }
             guard let call = running[id] else { continue }
             if Self.keepsRunningWhenTalkedOver(call.name) {
-                detached.updateValue(call.request.map(Self.normalized), forKey: id)
+                runs[id] = Run(request: call.request.map(Self.normalized), attachesPhotos: call.attachesPhotos)
             } else {
                 cancelled.append(id)
             }
@@ -41,39 +50,83 @@ public struct LunaTalkedOverRequests: Equatable, Sendable {
         return cancelled
     }
 
-    /// A new tool call arrived. Returns the id of the detached run that will answer it, or
-    /// nil when the call should run normally. Matches the request text, ignoring case and
-    /// spacing; a run answers at most one repeat.
-    public mutating func adopt(_ call: LunaNativeToolCall) -> String? {
-        guard Self.keepsRunningWhenTalkedOver(call.name), let request = call.request else { return nil }
-        let wanted = Self.normalized(request)
-        guard let run = detached.keys.sorted().first(where: { (detached[$0] ?? nil) == wanted && adoptedBy[$0] == nil })
-        else { return nil }
-        adoptedBy[run] = call
-        return run
+    /// What to do with a new tool call.
+    public enum Route: Sendable {
+        /// Run it normally.
+        case run
+        /// The detached run with this id is still working on the same request: it answers
+        /// this call when it finishes.
+        case adopt(String)
+        /// The same request already finished while talked over: answer with this result now.
+        case answer(LunaNativeToolResult)
+        /// A talked-over request still runs (the server works on one request per chat at a
+        /// time, so another would queue behind it and time out): answer on the phone at once
+        /// with this text, without asking the server.
+        case busy(String)
+    }
+
+    public static let busyAnswer = "The user's earlier request is still running. Tell them you'll share its "
+        + "result when it's back, and to ask this again after that."
+    public static let busyWithoutPhotosAnswer = "The user's earlier request is still running, without the "
+        + "photos. Tell them you'll share its result when it's back, and to ask again with the photos after that."
+
+    /// Matches the request text, ignoring case and spacing; a run answers at most one repeat.
+    /// While a talked-over request still runs, any other back-office request is answered busy.
+    public mutating func route(_ call: LunaNativeToolCall) -> Route {
+        guard Self.keepsRunningWhenTalkedOver(call.name) else { return .run }
+        let wanted = call.request.map(Self.normalized)
+        if let wanted, let id = runs.keys.sorted().first(where: { runs[$0]?.request == wanted }), let run = runs[id] {
+            if let finished = run.finished, !call.attachesPhotos || run.attachesPhotos {
+                runs[id] = nil
+                return .answer(finished)
+            }
+            if run.finished == nil {
+                // A repeat that adds photos the run does not have cannot be answered by it.
+                if call.attachesPhotos && !run.attachesPhotos { return .busy(Self.busyWithoutPhotosAnswer) }
+                guard adoptedBy[id] == nil else { return .busy(Self.busyAnswer) }
+                adoptedBy[id] = call
+                return .adopt(id)
+            }
+        }
+        return isRunning ? .busy(Self.busyAnswer) : .run
     }
 
     /// What to do with a finished run's result.
     public enum Delivery: Equatable, Sendable {
         /// Answer this tool call (the original one, or the repeat that adopted the run).
         case respond(LunaNativeToolCall)
-        /// Nobody waits for it any more: tell the call in a note.
+        /// Nobody waits for it: tell the call in a note (`takeUndelivered` when sending it).
         case note
     }
 
-    /// The run for `call` finished.
-    public mutating func finish(_ call: LunaNativeToolCall) -> Delivery {
-        guard detached.removeValue(forKey: call.id) != nil else { return .respond(call) }
-        if let repeated = adoptedBy.removeValue(forKey: call.id) { return .respond(repeated) }
+    /// The run for `call` finished with `result`.
+    public mutating func finish(_ call: LunaNativeToolCall, result: LunaNativeToolResult) -> Delivery {
+        guard runs[call.id] != nil else { return .respond(call) }
+        if let repeated = adoptedBy.removeValue(forKey: call.id) {
+            runs[call.id] = nil
+            return .respond(repeated)
+        }
+        runs[call.id]?.finished = result
         return .note
     }
 
-    public func isDetached(_ id: String) -> Bool { detached.keys.contains(id) }
+    /// The finished result of a talked-over run that no repeat has taken yet, removed from
+    /// the ledger. nil when a repeat was already answered with it.
+    public mutating func takeUndelivered(_ id: String) -> LunaNativeToolResult? {
+        guard let finished = runs[id]?.finished else { return nil }
+        runs[id] = nil
+        return finished
+    }
+
+    public func isDetached(_ id: String) -> Bool { runs[id] != nil }
+
+    /// A talked-over request is still working (not yet finished).
+    public var isRunning: Bool { runs.values.contains { $0.finished == nil } }
 
     /// Repeats waiting on a detached run (they count as tools in flight).
     public var waitingRepeats: Int { adoptedBy.count }
 
-    public var isEmpty: Bool { detached.isEmpty && adoptedBy.isEmpty }
+    public var isEmpty: Bool { runs.isEmpty && adoptedBy.isEmpty }
 
     /// The call ended: nothing is waiting any more.
     public mutating func reset() { self = Self() }
@@ -86,6 +139,14 @@ public struct LunaTalkedOverRequests: Equatable, Sendable {
     public static func resultText(_ response: Data) -> String {
         guard let object = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else { return "" }
         return (object["result"] as? String) ?? (object["error"] as? String) ?? ""
+    }
+
+    /// Told to the voice model when the user talks over a request that keeps running, so it
+    /// neither asks again nor claims the request was dropped.
+    public static func detachedNote(request: String?) -> String {
+        let what = request.map { " (\"\(String($0.prefix(300)))\")" } ?? ""
+        return "[Update from Luna's phone] The user talked over your request\(what). It is still running, and "
+            + "its result will come as an update. Do not ask for it again; if the user asks, say it is on its way."
     }
 
     /// What Luna hears when talked-over work finishes; nil when there is nothing to say.

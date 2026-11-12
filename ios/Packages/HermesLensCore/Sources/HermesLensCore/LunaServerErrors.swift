@@ -61,7 +61,10 @@ public extension LunaNativeError {
         if error.status == 401 || error.status == 403 { self = .wrongToken; return }
         switch error.code {
         case "native_voice_unavailable": self = .unavailable
-        case "native_provider_unavailable": self = .providerKeyRefused
+        // Google refused the server's Gemini key (it answered 400, 401 or 403 to the token request).
+        case "native_provider_key_rejected": self = .providerKeyRefused
+        // Any other failure to get a token (429, 5xx, network): try again later.
+        case "native_provider_unavailable": self = .providerUnavailable
         case "native_configuration_invalid": self = .serverSetup
         case "native_connection_failed", "native_provider_response_invalid": self = .providerUnreachable
         case "native_usage_limit": self = .usageLimit
@@ -83,7 +86,7 @@ public extension LunaNativeError {
         case .unavailable, .microphone, .usageLimit, .serverUnreachable, .microphoneBusy, .wrongToken,
              .providerKeyRefused, .serverSetup, .incompatible, .notLensServer: true
         case .connection, .invalidResponse, .activeCall, .audioBacklog, .microphoneSilent, .rateLimited,
-             .providerUnreachable: false
+             .providerUnreachable, .providerUnavailable: false
         }
     }
 }

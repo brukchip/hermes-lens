@@ -130,7 +130,7 @@ struct LunaCallPanel: View {
     /// can no longer be tapped once it has expired.
     private func approvalCard(_ approval: LunaNativeToolResult.Approval) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let left = call.approvalShownAt.map {
+            let left = call.approvalArrivedAt.map {
                 Int(LunaNativeVoice.approvalSecondsLeft(shownAt: $0, now: context.date).rounded(.up))
             }
             let expired = left == 0

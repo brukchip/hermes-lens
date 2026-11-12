@@ -38,7 +38,7 @@ import UIKit
     #expect(call.state.transcript.contains("desk"))
     call.ask("Send a message to Sam")
     try await Task.sleep(for: .seconds(1.5))
-    #expect(call.approval != nil && call.approvalShownAt != nil)
+    #expect(call.approval != nil && call.approvalArrivedAt != nil)
     call.decideApproval(false)
     #expect(call.approval == nil)
     #expect(call.state.transcript.contains("cancelled"))
@@ -315,11 +315,11 @@ import UIKit
     let code = "HL1-" + json.base64EncodedString().replacingOccurrences(of: "+", with: "-")
         .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     await model.handleOpenURL(try #require(URL(string: "hermeslens://setup?code=\(code)")))
-    guard case .confirm(let pending) = model.setupLinkPrompt else { Issue.record("Expected a confirmation"); return }
+    guard case .confirm(let pending) = model.setupPrompt else { Issue.record("Expected a confirmation"); return }
     #expect(pending.server.host() == "lens.example.test")
     #expect(model.settings.bridgeURL != "https://lens.example.test") // nothing saved before Connect
-    await model.answerSetupLink(connect: false)
-    #expect(model.setupLinkPrompt == nil)
+    await model.answerSetupCode(connect: false)
+    #expect(model.setupPrompt == nil)
     await model.handleOpenURL(try #require(URL(string: "hermeslens://setup?code=HL1-junk")))
-    #expect(model.setupLinkPrompt == .invalid)
+    #expect(model.setupPrompt == .invalid)
 }

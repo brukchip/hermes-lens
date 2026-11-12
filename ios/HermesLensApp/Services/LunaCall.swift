@@ -62,7 +62,10 @@ protocol LunaCall: AnyObject {
     var toolsAvailable: Bool { get }
     var approval: LunaNativeToolResult.Approval? { get }
     var approvalBusy: Bool { get }
-    var approvalShownAt: Date? { get }
+    /// When the server issued the current card (its two-minute countdown runs from here).
+    var approvalArrivedAt: Date? { get }
+    /// True when a glasses double tap may approve the current card (`LunaApprovalGesture`).
+    func gestureMayApprove(now: Date) -> Bool
     /// A contact Luna read from a card, waiting for the user to check and save.
     var contactDraft: LunaContactDraft? { get }
     /// False when the call failed for a reason an immediate retry cannot fix.
@@ -169,7 +172,7 @@ final class LunaDemoCall: LunaCall {
     let toolsAvailable = true
     private(set) var approval: LunaNativeToolResult.Approval?
     private(set) var approvalBusy = false
-    private(set) var approvalShownAt: Date?
+    private(set) var approvalArrivedAt: Date?
     let contactDraft: LunaContactDraft? = nil
     let retryable = true
     var turns: [LunaCallTurn] { [LunaCallTurn](state.log) }
@@ -216,7 +219,7 @@ final class LunaDemoCall: LunaCall {
             guard id == self.state.generation else { return }
             if tool?.name == "ask_luna" {
                 self.approval = .init(id: UUID(), summary: "Send a message for you (demo)")
-                self.approvalShownAt = .now
+                self.approvalArrivedAt = .now
                 self.speak("That needs your OK. The buttons are on your phone.", generation: id)
             } else {
                 self.speak(Self.reply(to: tool?.name), generation: id)
@@ -227,11 +230,17 @@ final class LunaDemoCall: LunaCall {
     func decideApproval(_ approve: Bool) {
         guard let approval else { return }
         actions.append(LunaCallAction(summary: approval.summary, approved: approve))
-        self.approval = nil; approvalShownAt = nil
+        self.approval = nil; approvalArrivedAt = nil
         speak(approve ? "Done. I sent it." : "Okay, I cancelled it.", generation: state.generation)
     }
 
     func finishContact(saved: Bool) {}
+
+    func gestureMayApprove(now: Date) -> Bool {
+        LunaApprovalGesture.mayApprove(
+            visibleSince: approvalArrivedAt, now: now, fromTalkedOverRequest: false, busy: approvalBusy,
+            secondsLeft: approvalArrivedAt.map { LunaNativeVoice.approvalSecondsLeft(shownAt: $0, now: now) } ?? 0)
+    }
 
     private func speak(_ text: String, generation: UUID) {
         guard generation == state.generation else { return }
@@ -262,7 +271,7 @@ final class LunaUnavailableCall: LunaCall {
     let toolsAvailable = false
     let approval: LunaNativeToolResult.Approval? = nil
     let approvalBusy = false
-    let approvalShownAt: Date? = nil
+    let approvalArrivedAt: Date? = nil
     let contactDraft: LunaContactDraft? = nil
     let retryable = false
     let turns: [LunaCallTurn] = []
@@ -276,6 +285,7 @@ final class LunaUnavailableCall: LunaCall {
     func decideApproval(_ approve: Bool) {}
     func finishContact(saved: Bool) {}
     func ask(_ text: String) {}
+    func gestureMayApprove(now: Date) -> Bool { false }
 }
 
 extension EnvironmentValues {

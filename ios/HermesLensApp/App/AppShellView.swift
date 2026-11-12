@@ -141,7 +141,7 @@ struct AppShellView: View {
         .fullScreenCover(isPresented: Binding(get: { showsOnboarding }, set: { _ in })) {
             LunaOnboardingView(tryWithoutGlasses: tryWithoutGlasses)
                 .onAppear { onboardingInProgress = true }
-                .setupLinkConfirmation(model)
+                .setupCodeConfirmation(model)
         }
         .fullScreenCover(item: $capture, onDismiss: {
             audioCoordinator.release(.visualCapture)
@@ -159,7 +159,7 @@ struct AppShellView: View {
         } message: {
             Text(bindableModel.errorMessage ?? "Unknown error")
         }
-        .setupLinkConfirmation(model)
+        .setupCodeConfirmation(model)
         .onChange(of: intentRouter.handledIntent?.id) {
             handleIntent()
         }
@@ -195,9 +195,9 @@ struct AppShellView: View {
                     case .record: call.ask("The user held the capture button on their glasses. Record a short video now.")
                     case .toggleMute:
                         // While Luna waits for an OK, a double tap approves it instead of muting:
-                        // the user's own deliberate press, once, after the card has shown for 1.5 s.
-                        if call.approval != nil, !call.approvalBusy,
-                           let shown = call.approvalShownAt, Date.now.timeIntervalSince(shown) >= 1.5 {
+                        // the user's own deliberate press, once the card has been visible for 1.5 s,
+                        // and never for a card from a talked-over request (`LunaApprovalGesture`).
+                        if call.approval != nil, call.gestureMayApprove(now: .now) {
                             VoiceDiagnosticLog.record("approval.gesture", "approved")
                             call.decideApproval(true)
                         } else {

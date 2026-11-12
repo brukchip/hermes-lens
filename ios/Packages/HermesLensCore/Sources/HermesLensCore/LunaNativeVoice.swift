@@ -90,7 +90,8 @@ public enum LunaNativeError: LocalizedError, Sendable {
     /// The microphone delivered pure digital silence, even after the audio was reset.
     case microphoneSilent
     /// The plugin refused the call (see `init(_: LunaServerError)` for the codes).
-    case wrongToken, providerKeyRefused, providerUnreachable, serverSetup, rateLimited, incompatible, notLensServer
+    case wrongToken, providerKeyRefused, providerUnavailable, providerUnreachable, serverSetup, rateLimited
+    case incompatible, notLensServer
     public var errorDescription: String? {
         switch self {
         case .unavailable: "Live voice is not activated on the server yet."
@@ -105,6 +106,7 @@ public enum LunaNativeError: LocalizedError, Sendable {
         case .microphoneSilent: "Luna can't hear the glasses microphone. Try again; if it keeps happening, switch the glasses off and on."
         case .wrongToken: "Luna's server didn't accept the access token. Check the token in Settings."
         case .providerKeyRefused: "Google refused the Gemini key on your Hermes server. Run hermes lens setup on the server to enter a working key, then try again."
+        case .providerUnavailable: "Gemini isn't available right now. Try again in a moment."
         case .providerUnreachable: "Your Hermes server couldn't reach the live voice service. Try again in a moment."
         case .serverSetup: "Your Hermes server's voice settings aren't supported. Run hermes lens setup on the server, then try again."
         case .rateLimited: "Luna's server is busy with too many requests. Wait a minute, then try again."
@@ -472,9 +474,9 @@ public struct LunaNativeCallState: Equatable, Sendable {
     /// True when `heard` began after Luna's current `transcript`: a new question, shown
     /// below her previous answer until she replies.
     public private(set) var heardIsLatest = false
-    /// The whole conversation in spoken order, for the call record.
+    /// The whole conversation in spoken order, for the call record. `heard` and
+    /// `heardIsLatest` follow it.
     public private(set) var log = LunaTranscriptLog()
-    private var userTurnOpen = false
     public private(set) var interrupted = false
     public private(set) var generation = UUID()
     public private(set) var playbackGeneration = UUID()
@@ -502,14 +504,17 @@ public struct LunaNativeCallState: Equatable, Sendable {
         clearPlayback()
         turnIsComplete = true
         phase = .listening
-        log.lunaStopped()
+        log.lunaStopped(); syncHeard()
+    }
+
+    private mutating func syncHeard() {
+        heard = String(log.currentUser.suffix(4_000)); heardIsLatest = log.userSpokeLast
     }
 
     private mutating func startResponse() {
         if !responseInProgress {
             clearPlayback()
             responseInProgress = true; turnIsComplete = false; transcript = ""; interrupted = false
-            heardIsLatest = false
         }
     }
 
@@ -519,18 +524,14 @@ public struct LunaNativeCallState: Equatable, Sendable {
         switch event {
         case .ready: connected()
         case .inputTranscript(let text):
-            if !userTurnOpen { heard = ""; userTurnOpen = true; heardIsLatest = true }
-            heard = String((heard + text).suffix(4_000))
-            log.user(text)
+            log.user(text); syncHeard()
             if phase == .listening { phase = .responding }
         case .outputTranscript(let text):
-            userTurnOpen = false
             guard !suppressingOutput else { return false }
             startResponse(); transcript = String((transcript + text).prefix(16_000))
-            log.luna(text)
+            log.luna(text); syncHeard()
             if phase != .speaking { phase = .responding }
         case .audio(let data):
-            userTurnOpen = false
             guard !suppressingOutput else { return false }
             startResponse()
             guard queuedAudioBytes + data.count <= 1_440_000 else { fail(); return false }
@@ -541,7 +542,7 @@ public struct LunaNativeCallState: Equatable, Sendable {
         case .generationComplete: break // Not an audible or complete-turn boundary.
         case .turnComplete:
             turnIsComplete = true; suppressingOutput = false
-            log.turnEnded()
+            log.turnEnded(); syncHeard()
             if queuedAudioBytes == 0 { responseInProgress = false; phase = .listening }
         case .failure: fail()
         case .goAway, .usage, .toolCalls, .toolCancellation: break

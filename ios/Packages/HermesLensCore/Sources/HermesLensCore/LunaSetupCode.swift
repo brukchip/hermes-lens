@@ -14,6 +14,13 @@ public struct LunaSetupCode: Equatable, Sendable {
     public let token: String
 
     public static let prefix = "HL1-"
+
+    /// The server as the user should check it before connecting: host, and port when given
+    /// ("box.example.net:8443").
+    public var displayHost: String {
+        let host = server.host() ?? server.absoluteString
+        return server.port.map { "\(host):\($0)" } ?? host
+    }
     /// The host of the setup link (`<scheme>://setup?code=…`).
     public static let linkHost = "setup"
     public static let invalidMessage = "That isn't a valid Hermes Lens setup code. Run hermes lens setup on your "
@@ -37,7 +44,7 @@ public struct LunaSetupCode: Equatable, Sendable {
 
     /// The code in a setup link; nil when the link carries none.
     public static func parse(link url: URL) -> LunaSetupCode? {
-        guard isSetupLink(url) else { return nil }
+        guard isSetupLink(url), url.absoluteString.utf8.count <= 4_096 else { return nil }
         return code(in: url).flatMap(decode)
     }
 
@@ -64,5 +71,27 @@ public struct LunaSetupCode: Equatable, Sendable {
               token.unicodeScalars.allSatisfy({ (0x21...0x7E).contains($0.value) })
         else { return nil }
         return LunaSetupCode(server: url, token: token)
+    }
+}
+
+/// What to do with the token field when the user leaves it without "Save and connect".
+/// An empty field never erases the saved token, and a different token never silently
+/// replaces a saved one: the user is asked first.
+public enum LunaTokenFieldDecision: Equatable, Sendable {
+    /// Nothing to save.
+    case keep
+    /// The field was cleared: put the saved token back (nothing is erased).
+    case restoreSaved
+    /// No token was saved yet: save this one.
+    case save
+    /// A different token would replace the saved one: ask first.
+    case askBeforeReplacing
+
+    /// `field` is the trimmed text in the field, `saved` the token in Keychain.
+    public init(field: String, saved: String) {
+        if field == saved { self = .keep }
+        else if field.isEmpty { self = .restoreSaved }
+        else if saved.isEmpty { self = .save }
+        else { self = .askBeforeReplacing }
     }
 }

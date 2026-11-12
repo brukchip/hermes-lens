@@ -103,8 +103,12 @@ final class LunaNativeSession {
     /// Tools in flight (look, record, back office), shown as chips on Home.
     private(set) var tools: [LunaToolActivity] = []
     var activeTools: Int { tools.count }
-    /// When the current approval card appeared (for its countdown).
-    private(set) var approvalShownAt: Date?
+    /// When the server issued the current approval card (its countdown runs from here).
+    private(set) var approvalArrivedAt: Date?
+    /// When the current card actually became visible (the double-tap guard runs from here).
+    @ObservationIgnored private var approvalVisibleSince: Date?
+    /// The current card came from a talked-over request: only the on-screen button approves it.
+    @ObservationIgnored private var approvalFromTalkedOver = false
     /// The conversation so far, kept in memory and handed to the call record at End.
     var turns: [LunaCallTurn] { [LunaCallTurn](state.log) }
     /// Actions the user approved or declined during this call.
@@ -325,12 +329,21 @@ final class LunaNativeSession {
         case .toolCancellation(let ids):
             // Talking over Luna cancels her tool calls. A look or recording stops; a back-office
             // request keeps running (its HTTP request stays open, so Hermes is not stopped).
+            let wasDetached = Set(ids.filter { talkedOver.isDetached($0) })
             let cancelled = talkedOver.cancel(ids, running: toolCalls)
             for id in cancelled {
                 toolTasks.removeValue(forKey: id)?.cancel(); toolCalls[id] = nil
             }
             tools.removeAll { cancelled.contains($0.id) }
-            trace("tool.cancelled", detail: "count=\(ids.count) detached=\(ids.filter { talkedOver.isDetached($0) }.count)")
+            let detached = ids.filter { talkedOver.isDetached($0) && !wasDetached.contains($0) }
+            trace("tool.cancelled", detail: "count=\(ids.count) detached=\(detached.count)")
+            // Tell the voice model the request goes on, so it neither asks again nor says it was dropped.
+            if let socket {
+                for id in detached {
+                    let note = LunaTalkedOverRequests.detachedNote(request: toolCalls[id]?.request)
+                    Task { try? await socket.sendMessage(LunaNativeWire.text(note)) }
+                }
+            }
             return
         default: break
         }
@@ -499,9 +512,28 @@ final class LunaNativeSession {
     /// outcome codes and timings are traced, never the request, image or answer.
     private func startTool(_ call: LunaNativeToolCall, generation: UUID) {
         guard let callID, let socket, toolTasks[call.id] == nil else { return }
-        if talkedOver.adopt(call) != nil {
+        switch talkedOver.route(call) {
+        case .run: break
+        case .adopt:
             // Asked again for what is still running from before a talk-over: that run answers it.
             trace("tool.adopted", detail: "name=\(Self.toolLabel(call.name))")
+            return
+        case .answer(let finished):
+            // The same request already finished while talked over: answer from its result.
+            trace("tool.adopted", detail: "name=\(Self.toolLabel(call.name)) finished=true")
+            Task { [weak self] in
+                guard (try? await socket.sendMessage(LunaNativeWire.toolResponse(
+                    id: call.id, name: call.name, response: finished.response))) != nil else { return }
+                guard let self, let card = finished.approval else { return }
+                _ = await self.showTalkedOverCard(card, arrivedAt: .now, generation: generation)
+            }
+            return
+        case .busy(let answer):
+            // A talked-over request still holds the server's chat: answer at once, no request
+            // that would only queue behind it and time out.
+            trace("tool.busy", detail: "name=\(Self.toolLabel(call.name))")
+            Task { try? await socket.sendMessage(LunaNativeWire.toolResponse(
+                id: call.id, name: call.name, response: LunaNativeWire.toolResult(answer))) }
             return
         }
         let started = ProcessInfo.processInfo.systemUptime
@@ -546,9 +578,9 @@ final class LunaNativeSession {
             guard !Task.isCancelled, let self, generation == self.state.generation else { return }
             self.toolTasks[call.id] = nil; self.toolCalls[call.id] = nil; self.tools.removeAll { $0.id == call.id }
             let answering: LunaNativeToolCall
-            switch self.talkedOver.finish(call) {
+            switch self.talkedOver.finish(call, result: result) {
             case .note:
-                self.deliverTalkedOver(result, generation: generation)
+                self.deliverTalkedOver(call.id, hasCard: result.approval != nil, generation: generation)
                 self.trace("tool.detached_result", detail: "name=\(Self.toolLabel(call.name)) "
                     + "approval=\(result.approval != nil) ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
                 return
@@ -563,7 +595,7 @@ final class LunaNativeSession {
                 self.fail(LunaNativeError.connection, reason: "tool_response_send", underlying: error); return
             }
             if let approval = result.approval {
-                self.approval = approval; self.approvalShownAt = .now; outcome = "needs_approval"
+                self.showApproval(approval, arrivedAt: .now, fromTalkedOver: false); outcome = "needs_approval"
                 #if DEBUG
                 // Self-test only: exercise the card path by declining. Never approves.
                 if LunaSelfTest.flag("-LunaAutoDecline") {
@@ -580,31 +612,63 @@ final class LunaNativeSession {
         tools.append(LunaToolActivity(id: call.id, name: call.name, request: call.request))
     }
 
-    /// A talked-over request finished and nobody waits for it: tell the call. An approval card
-    /// shows as soon as no other card is up (its countdown runs from when it arrived, like the
-    /// server's); the note waits until Luna is listening, for at most a minute.
-    private func deliverTalkedOver(_ result: LunaNativeToolResult, generation: UUID) {
-        guard let note = LunaTalkedOverRequests.note(result: LunaTalkedOverRequests.resultText(result.response),
-                                                     approvalSummary: result.approval?.summary) else { return }
+    /// A talked-over request finished and nobody waits for it: tell the call. Its result stays
+    /// in the ledger until the note goes out, so a repeat meanwhile is answered from it (and
+    /// then no note is sent). An approval card is taken at once and shown as soon as no other
+    /// card is up (see `showTalkedOverCard`); the note waits until Luna is listening, for at
+    /// most a minute, and is skipped if the user already answered the card.
+    private func deliverTalkedOver(_ runID: String, hasCard: Bool, generation: UUID) {
         let arrived = Date.now
         Task { [weak self] in
+            guard let self else { return }
+            var card: LunaNativeToolResult.Approval?
+            var result: LunaNativeToolResult?
+            if hasCard {
+                guard let taken = self.talkedOver.takeUndelivered(runID), let approval = taken.approval else { return }
+                guard await self.showTalkedOverCard(approval, arrivedAt: arrived, generation: generation) else { return }
+                result = taken; card = approval
+            }
             let started = ProcessInfo.processInfo.systemUptime
-            var cardShown = false
-            while true {
-                guard let self, generation == self.state.generation,
-                      [.listening, .responding, .speaking].contains(self.state.phase) else { return }
-                if let card = result.approval, !cardShown, !self.hasLiveApproval, !self.approvalBusy {
-                    self.approval = card; self.approvalShownAt = arrived; cardShown = true
-                }
-                let cardSettled = result.approval == nil || cardShown
-                if (self.state.phase == .listening && cardSettled)
-                    || ProcessInfo.processInfo.systemUptime - started > 60 { break }
+            while generation == self.state.generation, [.responding, .speaking].contains(self.state.phase),
+                  ProcessInfo.processInfo.systemUptime - started < 60 {
                 try? await Task.sleep(for: .milliseconds(500))
             }
-            // Another card stayed up the whole time: this one expires on the server unanswered.
-            guard let self, let socket = self.socket, result.approval == nil || cardShown else { return }
+            guard generation == self.state.generation, self.state.phase == .listening
+                    || [.responding, .speaking].contains(self.state.phase), let socket = self.socket else { return }
+            if !hasCard { result = self.talkedOver.takeUndelivered(runID) }
+            // A repeat already took the result.
+            guard let result else { return }
+            // The user already answered the card: their tap sent its own note.
+            if let card, self.approval?.id != card.id { return }
+            guard let note = LunaTalkedOverRequests.note(result: LunaTalkedOverRequests.resultText(result.response),
+                                                         approvalSummary: card?.summary) else { return }
             try? await socket.sendMessage(LunaNativeWire.text(note))
         }
+    }
+
+    /// Shows a talked-over request's card once no other card is up or being answered. It is
+    /// never dropped silently: if it expires while waiting, it is declined on the server
+    /// (nothing happens), Luna is told, and the trace says so. True when it was shown.
+    private func showTalkedOverCard(_ card: LunaNativeToolResult.Approval, arrivedAt: Date,
+                                    generation: UUID) async -> Bool {
+        while true {
+            guard generation == state.generation,
+                  [.listening, .responding, .speaking].contains(state.phase) else { return false }
+            if !hasLiveApproval, !approvalBusy {
+                showApproval(card, arrivedAt: arrivedAt, fromTalkedOver: true)
+                return true
+            }
+            if LunaNativeVoice.approvalSecondsLeft(shownAt: arrivedAt) <= 0 { break }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        trace("tool.detached_card", detail: "dropped")
+        actions.append(LunaCallAction(summary: card.summary, approved: false))
+        guard let callID, let socket else { return false }
+        _ = try? await broker.decide(callID: callID, approvalID: card.id, approve: false)
+        try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's phone] A request from earlier in "
+            + "this call needed the user's approval for: \(card.summary). Another approval was on screen until it "
+            + "expired, so it was declined and nothing was done. Tell them in one short sentence; they can ask again."))
+        return false
     }
 
     private func runLocalTool(_ call: LunaNativeToolCall) async -> (LunaNativeToolResult, Data?, String) {
@@ -675,10 +739,26 @@ final class LunaNativeSession {
         name == LunaNativeVoice.toolName || LunaNativeVoice.localTools.contains(name) ? name : "unknown"
     }
 
+    private func showApproval(_ card: LunaNativeToolResult.Approval, arrivedAt: Date, fromTalkedOver: Bool) {
+        approval = card; approvalArrivedAt = arrivedAt
+        approvalVisibleSince = .now; approvalFromTalkedOver = fromTalkedOver
+    }
+
+    private func clearApproval() {
+        approval = nil; approvalArrivedAt = nil; approvalVisibleSince = nil; approvalFromTalkedOver = false
+    }
+
+    func gestureMayApprove(now: Date) -> Bool {
+        LunaApprovalGesture.mayApprove(
+            visibleSince: approval == nil ? nil : approvalVisibleSince, now: now,
+            fromTalkedOverRequest: approvalFromTalkedOver, busy: approvalBusy,
+            secondsLeft: approvalArrivedAt.map { LunaNativeVoice.approvalSecondsLeft(shownAt: $0, now: now) } ?? 0)
+    }
+
     /// A card is up that can still be answered (an expired one stays, disabled, until replaced).
     private var hasLiveApproval: Bool {
         guard approval != nil else { return false }
-        guard let shown = approvalShownAt else { return true }
+        guard let shown = approvalArrivedAt else { return true }
         return LunaNativeVoice.approvalSecondsLeft(shownAt: shown) > 0
     }
 
@@ -687,9 +767,9 @@ final class LunaNativeSession {
     func decideApproval(_ approve: Bool) {
         guard let approval, let callID, let socket, !approvalBusy else { return }
         let generation = state.generation
-        if let shown = approvalShownAt, LunaNativeVoice.approvalSecondsLeft(shownAt: shown) <= 0 {
+        if let shown = approvalArrivedAt, LunaNativeVoice.approvalSecondsLeft(shownAt: shown) <= 0 {
             // The server has already denied it; a tap now would do nothing.
-            self.approval = nil; approvalShownAt = nil
+            clearApproval()
             trace("approval.expired", detail: "approve=\(approve)")
             Task {
                 try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's phone] The approval card for: "
@@ -713,8 +793,12 @@ final class LunaNativeSession {
             catch { result = nil; refused = error as? LunaServerError }
             guard let self, generation == self.state.generation else { return }
             self.approvalBusy = false
-            self.approval = result?.approval
-            self.approvalShownAt = result?.approval == nil ? nil : .now
+            if let next = result?.approval {
+                // A follow-up card keeps the gesture rule of the card it continues.
+                self.showApproval(next, arrivedAt: .now, fromTalkedOver: self.approvalFromTalkedOver)
+            } else {
+                self.clearApproval()
+            }
             let body = result.map { LunaTalkedOverRequests.resultText($0.response) } ?? ""
             let tapped = approve ? "Approve" : "Decline"
             let note: String
@@ -969,8 +1053,9 @@ final class LunaNativeSession {
 
     /// True while Luna's back office is working for the user: a delegated request or an
     /// approved action. Local look/record have their own on-screen progress.
+    /// A talked-over request does not count: the conversation has moved on to other things.
     private var backOfficeWorking: Bool {
-        approvalBusy || tools.contains { !LunaNativeVoice.localTools.contains($0.name) }
+        approvalBusy || tools.contains { !LunaNativeVoice.localTools.contains($0.name) && !talkedOver.isDetached($0.id) }
     }
 
     /// A soft cue on the glasses while the back office works and nobody is talking: first
@@ -980,20 +1065,25 @@ final class LunaNativeSession {
         thinkingTask?.cancel()
         thinkingTask = Task { [weak self] in
             var quietFor = 0.0
+            var workStarted: TimeInterval?
+            var lastSlot: Int?
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, generation == self.state.generation else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                guard self.backOfficeWorking, ![.idle, .connecting, .failed, .ended].contains(self.state.phase) else {
+                    workStarted = nil; lastSlot = nil; quietFor = 0; continue
+                }
+                if workStarted == nil { workStarted = now }
                 // Quiet means no speech either way, measured from the audio itself: while a
                 // delegated request runs, the call phase stays `.speaking` after Luna's
                 // "let me check" (self-test, 2026-10-31).
-                let now = ProcessInfo.processInfo.systemUptime
                 let quiet = now > self.speechPlaysUntil + 0.3 && now - self.lastSpeechAt > 1
-                guard self.backOfficeWorking, quiet, ![.idle, .connecting, .failed, .ended].contains(self.state.phase)
-                else { quietFor = 0; continue }
-                let before = quietFor
-                quietFor += 0.5
-                if LunaWorkingTone.plays(from: before, to: quietFor) {
-                    if before < LunaWorkingTone.firstAfter { self.trace("thinking.cue") }
+                quietFor = quiet ? quietFor + 0.5 : 0
+                if let start = workStarted,
+                   let slot = LunaWorkingTone.due(workingFor: now - start, quietFor: quietFor, lastPlayed: lastSlot) {
+                    if lastSlot == nil { self.trace("thinking.cue") }
+                    lastSlot = slot
                     self.playThinkingCue()
                 }
             }
@@ -1216,7 +1306,7 @@ final class LunaNativeSession {
         // The call is over: talked-over requests stop with it.
         toolTasks.values.forEach { $0.cancel() }; toolTasks = [:]; toolCalls = [:]; tools = []; pendingAsk = nil
         talkedOver.reset()
-        approval = nil; approvalBusy = false; approvalShownAt = nil
+        clearApproval(); approvalBusy = false
         if let localTools { Task { await localTools.endCall() } }
         inputWatchdog?.cancel(); inputWatchdog = nil; inputProbe = nil
         silenceWatchdog?.cancel(); silenceWatchdog = nil; silentInputResets = 0

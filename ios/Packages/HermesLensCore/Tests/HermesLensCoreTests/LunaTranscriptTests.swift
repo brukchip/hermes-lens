@@ -84,9 +84,49 @@ private let pcm = Data(repeating: 12, count: 960)
 @Test func transcriptLogBoundsItsSize() {
     var log = LunaTranscriptLog()
     for index in 0..<(LunaTranscriptLog.maxEntries + 10) {
-        log.user("q\(index)"); log.luna("a\(index)")
+        log.user("q\(index)"); log.luna("a\(index)"); log.turnEnded()
     }
-    #expect(log.entries.count == LunaTranscriptLog.maxEntries + 1) // + the open answer
+    #expect(log.entries.count == LunaTranscriptLog.maxEntries)
     log.user(String(repeating: "x", count: 10_000))
     #expect(log.entries.last?.text.count == LunaTranscriptLog.maxEntryCharacters)
+}
+
+@Test func aLateChunkOfTheQuestionJoinsItInsteadOfSplittingBothUtterances() {
+    var state = LunaNativeCallState()
+    state.begin(); state.connected()
+    let id = state.generation
+    state.receive(.inputTranscript("What time"), generation: id)
+    state.receive(.outputTranscript("It's"), generation: id)
+    // Gemini delivers the tail of the question after Luna started answering.
+    state.receive(.inputTranscript(" is it?"), generation: id)
+    state.receive(.outputTranscript(" three."), generation: id)
+    state.receive(.turnComplete, generation: id)
+    #expect(state.log.entries == [Entry(speaker: .you, text: "What time is it?"),
+                                  Entry(speaker: .luna, text: "It's three.")])
+    #expect(state.heard == "What time is it?" && !state.heardIsLatest)
+}
+
+@Test func theSameChunkOrderFollowedByAnInterruptionStartsANewUtterance() {
+    var state = LunaNativeCallState()
+    state.begin(); state.connected()
+    let id = state.generation
+    state.receive(.inputTranscript("What time is it?"), generation: id)
+    state.receive(.outputTranscript("It's"), generation: id)
+    state.receive(.inputTranscript(" Wait,"), generation: id)
+    #expect(state.heardIsLatest) // shown below Luna's answer meanwhile
+    state.receive(.interrupted, generation: id)
+    state.receive(.inputTranscript(" what's the date?"), generation: id)
+    state.receive(.outputTranscript("The ninth."), generation: id)
+    state.receive(.turnComplete, generation: id)
+    #expect(state.log.entries.map(\.text) == ["What time is it?", "It's", "Wait, what's the date?", "The ninth."])
+}
+
+@Test func wordsDuringAnAnswerThatEndsWithoutMoreOfItStartANewUtterance() {
+    var log = LunaTranscriptLog()
+    log.user("Hi"); log.luna("Hello!")
+    log.user(" One more thing")
+    log.turnEnded()
+    log.user(" about tomorrow")
+    log.luna("Sure.")
+    #expect(log.entries.map(\.text) == ["Hi", "Hello!", "One more thing about tomorrow", "Sure."])
 }

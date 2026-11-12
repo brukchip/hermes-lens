@@ -83,29 +83,56 @@ final class AppModel {
     }
 
     /// Keeps a server address and token the user typed but left without "Save and connect"
-    /// (onboarding's Continue, Skip or a swipe, or leaving Settings): the token goes to
-    /// Keychain and Luna reconnects with them. Nothing happens when nothing changed.
+    /// (onboarding's Continue, Skip or a swipe, or leaving Settings), and reconnects with them.
+    /// A first token is saved to Keychain; an empty field never erases the saved token; a
+    /// different token replaces the saved one only after the user confirms. Nothing happens
+    /// when nothing changed.
     func commitServerFields() async {
         settings.bridgeURL = settings.bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.accessToken = settings.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tokenChanged = settings.hasUnsavedAccessToken
-        guard tokenChanged || servicesEndpoint != settings.bridgeURL else { return }
-        if tokenChanged {
-            do { try settings.saveAccessToken() } catch {
-                errorMessage = "The token could not be saved to Keychain."
-                return
-            }
+        switch settings.tokenFieldDecision {
+        case .keep: break
+        case .restoreSaved: settings.restoreSavedAccessToken()
+        case .save:
+            guard saveTokenToKeychain() else { return }
+        case .askBeforeReplacing:
+            setupPrompt = .replaceToken
+            return
         }
+        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.accessToken else { return }
         rebuildServices()
         await refreshReadiness()
     }
 
-    /// The server address the current client was built for.
+    /// The user answered "Replace the saved access token?".
+    func answerTokenReplacement(replace: Bool) async {
+        guard setupPrompt == .replaceToken else { return }
+        setupPrompt = nil
+        if replace {
+            guard saveTokenToKeychain() else { return }
+        } else {
+            settings.restoreSavedAccessToken()
+        }
+        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.accessToken else { return }
+        rebuildServices()
+        await refreshReadiness()
+    }
+
+    private func saveTokenToKeychain() -> Bool {
+        do { try settings.saveAccessToken(); return true } catch {
+            errorMessage = "The token could not be saved to Keychain."
+            return false
+        }
+    }
+
+    /// The server address and token the current client was built for (memory only).
     @ObservationIgnored private var servicesEndpoint: String?
+    @ObservationIgnored private var servicesToken: String?
 
     func rebuildServices() {
         endpointProblem = nil
         servicesEndpoint = settings.bridgeURL
+        servicesToken = settings.accessToken
         if settings.usesMockHermes {
             hermesClient = MockHermesClient()
         } else {
@@ -172,6 +199,7 @@ final class AppModel {
         do {
             lensConfiguration = try await hermesClient.lensConfiguration()
             hasServerConfiguration = true
+            serverProblem = nil  // the server answered with this token: an earlier problem is over
             Self.cacheLensConfiguration(lensConfiguration)
         } catch {
             // Keep the last valid configuration (or the fail-safe defaults).
@@ -722,26 +750,39 @@ final class AppModel {
         (try? await glassesService.requestCameraPermission()) ?? false
     }
 
-    /// A setup link waiting for the user's Connect or Cancel, or a setup link that was invalid.
-    enum SetupLinkPrompt: Equatable {
+    /// A setup code (pasted or from a link) waiting for the user's Connect or Cancel, or a
+    /// setup link that was invalid.
+    enum SetupPrompt: Equatable {
         case confirm(LunaSetupCode)
         case invalid
+        /// A different access token was typed over the saved one.
+        case replaceToken
     }
-    var setupLinkPrompt: SetupLinkPrompt?
+    var setupPrompt: SetupPrompt?
 
     /// Fills in the server address and token from a setup code and connects, the same way as
     /// leaving the server fields (the token goes to Keychain). Never logs the code or token.
+    /// The token is written to Keychain first; the address changes only if that worked.
     func applySetupCode(_ code: LunaSetupCode) async {
-        settings.bridgeURL = code.server.absoluteString
+        let typed = settings.accessToken
         settings.accessToken = code.token
-        await commitServerFields()
+        guard saveTokenToKeychain() else { settings.accessToken = typed; return }
+        settings.bridgeURL = code.server.absoluteString
+        rebuildServices()
+        await refreshReadiness()
     }
 
-    /// The user tapped Connect (true) or Cancel on a setup link's confirmation.
-    func answerSetupLink(connect: Bool) async {
-        guard case .confirm(let code) = setupLinkPrompt else { setupLinkPrompt = nil; return }
-        setupLinkPrompt = nil
-        VoiceDiagnosticLog.record("setup.link", "result=\(connect ? "connect" : "cancel")")
+    /// A pasted code or a link can come from anywhere (a poisoned clipboard, a stranger's QR
+    /// code): it is never applied without the user confirming the server it names.
+    func offerSetupCode(_ code: LunaSetupCode) {
+        setupPrompt = .confirm(code)
+    }
+
+    /// The user tapped Connect (true) or Cancel on a setup code's confirmation.
+    func answerSetupCode(connect: Bool) async {
+        guard case .confirm(let code) = setupPrompt else { setupPrompt = nil; return }
+        setupPrompt = nil
+        VoiceDiagnosticLog.record("setup.confirm", "result=\(connect ? "connect" : "cancel")")
         if connect { await applySetupCode(code) }
     }
 
@@ -752,7 +793,7 @@ final class AppModel {
         if LunaSetupCode.isSetupLink(url) {
             let code = LunaSetupCode.parse(link: url)
             VoiceDiagnosticLog.record("setup.code", "result=\(code == nil ? "invalid" : "ok") source=link")
-            setupLinkPrompt = code.map { .confirm($0) } ?? .invalid
+            if let code { offerSetupCode(code) } else { setupPrompt = .invalid }
             return
         }
         do {
