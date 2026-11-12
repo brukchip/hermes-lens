@@ -90,7 +90,8 @@ public enum LunaNativeError: LocalizedError, Sendable {
     /// The microphone delivered pure digital silence, even after the audio was reset.
     case microphoneSilent
     /// The plugin refused the call (see `init(_: LunaServerError)` for the codes).
-    case wrongToken, providerKeyRefused, providerUnreachable, serverSetup, rateLimited, incompatible, notLensServer
+    case wrongToken, providerKeyRefused, providerUnavailable, providerUnreachable, serverSetup, rateLimited
+    case incompatible, notLensServer
     public var errorDescription: String? {
         switch self {
         case .unavailable: "Live voice is not activated on the server yet."
@@ -105,6 +106,7 @@ public enum LunaNativeError: LocalizedError, Sendable {
         case .microphoneSilent: "Luna can't hear the glasses microphone. Try again; if it keeps happening, switch the glasses off and on."
         case .wrongToken: "Luna's server didn't accept the access token. Check the token in Settings."
         case .providerKeyRefused: "Google refused the Gemini key on your Hermes server. Run hermes lens setup on the server to enter a working key, then try again."
+        case .providerUnavailable: "Gemini isn't available right now. Try again in a moment."
         case .providerUnreachable: "Your Hermes server couldn't reach the live voice service. Try again in a moment."
         case .serverSetup: "Your Hermes server's voice settings aren't supported. Run hermes lens setup on the server, then try again."
         case .rateLimited: "Luna's server is busy with too many requests. Wait a minute, then try again."

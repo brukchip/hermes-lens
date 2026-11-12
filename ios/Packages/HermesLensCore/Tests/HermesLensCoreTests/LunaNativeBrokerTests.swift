@@ -107,11 +107,16 @@ private final class NativeRequests: @unchecked Sendable {
         let requests = NativeRequests()
         NativeStub.handler = { request in
             _ = requests.append(request)
-            return (503, Data(#"{"error":{"code":"native_provider_unavailable"}}"#.utf8))
+            return (503, Data(#"{"error":{"code":"native_provider_key_rejected"}}"#.utf8))
         }
         defer { NativeStub.handler = nil }
         await #expect(throws: LunaNativeError.providerKeyRefused) { _ = try await client.create(requestID: UUID()) }
         #expect(requests.values.count == 1)
+        #expect(LunaNativeError.providerKeyRefused.isLasting)
+        NativeStub.handler = { _ in (503, Data(#"{"error":{"code":"native_provider_unavailable"}}"#.utf8)) }
+        await #expect(throws: LunaNativeError.providerUnavailable) { _ = try await client.create(requestID: UUID()) }
+        #expect(!LunaNativeError.providerUnavailable.isLasting)
+        #expect(LunaNativeError.providerUnavailable.errorDescription?.contains("setup") == false)
         NativeStub.handler = { _ in (401, Data(#"{"error":{"code":"unauthorized"}}"#.utf8)) }
         await #expect(throws: LunaNativeError.wrongToken) { _ = try await client.create(requestID: UUID()) }
     }

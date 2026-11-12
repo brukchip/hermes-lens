@@ -8,7 +8,8 @@ private func body(_ code: String) -> Data { Data(#"{"error":{"code":"\#(code)"}}
     // (status, code) as adapter.py and grant.py send them → the error the user sees.
     let cases: [(Int, String?, LunaNativeError)] = [
         (401, "unauthorized", .wrongToken),
-        (503, "native_provider_unavailable", .providerKeyRefused),
+        (503, "native_provider_key_rejected", .providerKeyRefused),
+        (503, "native_provider_unavailable", .providerUnavailable),
         (503, "native_configuration_invalid", .serverSetup),
         (503, "native_connection_failed", .providerUnreachable),
         (502, "native_provider_response_invalid", .providerUnreachable),
@@ -42,7 +43,7 @@ private func body(_ code: String) -> Data { Data(#"{"error":{"code":"\#(code)"}}
                     .notLensServer, .unavailable, .serverUnreachable] {
         #expect(lasting.isLasting, "\(lasting)")
     }
-    for transient in [LunaNativeError.connection, .providerUnreachable, .rateLimited, .activeCall, .audioBacklog] {
+    for transient in [LunaNativeError.connection, .providerUnavailable, .providerUnreachable, .rateLimited, .activeCall, .audioBacklog] {
         #expect(!transient.isLasting, "\(transient)")
     }
 }
