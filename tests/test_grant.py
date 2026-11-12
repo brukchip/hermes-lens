@@ -74,7 +74,11 @@ def test_daily_budget_and_provider_errors_are_reported_plainly(tmp_path):
     b, _ = broker(tmp_path / "x", status=403)
     with pytest.raises(grant.GrantError) as provider:
         asyncio.run(b.create("dev", "req-1", BODY))
-    assert provider.value.status == 503
+    assert (provider.value.status, provider.value.code) == (503, "native_provider_key_rejected")
+    b, _ = broker(tmp_path / "busy", status=429)  # busy, not a bad key: worth trying again
+    with pytest.raises(grant.GrantError) as busy:
+        asyncio.run(b.create("dev", "req-1", BODY))
+    assert (busy.value.status, busy.value.code) == (503, "native_provider_unavailable")
     b, _ = broker(tmp_path / "y", data={"name": "not-a-token"})
     with pytest.raises(grant.GrantError):
         asyncio.run(b.create("dev", "req-1", BODY))

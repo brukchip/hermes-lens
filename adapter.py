@@ -364,6 +364,8 @@ class HermesLensAdapter(BasePlatformAdapter):
                 if not await self._previous_turn_finished(chat_id):
                     self._asks.pop(key, None)
                     return web.json_response({"response": voice.failure(
+                        "Your Hermes server is still starting. Try again in a moment."
+                        if self._gateway_starting() else
                         "I'm still finishing your last request. Try again in a moment.")},
                         headers={"Cache-Control": "no-store"})
                 self._active_call[chat_id] = ask.call_id
@@ -439,9 +441,11 @@ class HermesLensAdapter(BasePlatformAdapter):
                                       ("failed", "Your Hermes agent did not answer. Try again."))
                     break
                 if request.transport is None or request.transport.is_closing():
+                    self._forget_unstarted(chat_id, event_id)
                     await self._stop(chat_id, device_id)
                     return web.Response(status=499)
                 if time.monotonic() > deadline:
+                    self._forget_unstarted(chat_id, event_id)
                     await self._stop(chat_id, device_id)
                     return web.json_response({"response": voice.failure(
                         "That is taking longer than a call allows, so I stopped it. "
@@ -460,6 +464,16 @@ class HermesLensAdapter(BasePlatformAdapter):
         else:
             body = {"response": voice.answer(voice.spoken(value) or "Done.")}
         return web.json_response(body, headers={"Cache-Control": "no-store"})
+
+    def _forget_unstarted(self, chat_id: str, event_id: str) -> None:
+        """An ask that gave up on a message Hermes never picked up (never seen running and not
+        running now): stop waiting for it, so the chat is not locked until the stale limit. If
+        Hermes picks it up late, the next question still waits until Hermes lets go."""
+        running = self._lens_turns.get(chat_id)
+        seen = self._held.get(chat_id)
+        if (running is not None and running[0] == event_id and (seen is None or seen[0] != event_id)
+                and self._hermes_holds(chat_id) is False):
+            self._lens_turns.pop(chat_id, None)
 
     async def _stop(self, chat_id: str, device_id: str) -> None:
         """Interrupt the turn the way a user would: the gateway's own /stop command. Its

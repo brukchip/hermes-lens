@@ -637,10 +637,52 @@ def test_a_card_that_appears_while_a_question_waits_for_the_chat_is_not_interrup
     assert [e.text for e in fake.events] == ["send it"]
 
 
+def test_a_message_hermes_drops_does_not_block_the_next_question(server, monkeypatch):
+    """Found in review: a message Hermes never picks up (no session, no completion) used to lock
+    the chat for ten minutes after its own ask gave up."""
+    adapter, fake, app = server
+    monkeypatch.setattr(lens, "ASK_TIMEOUT_SECONDS", 0.4)
+    monkeypatch.setattr(lens, "STOPPING_GRACE_SECONDS", 0.6)
+    original = fake.handle
+
+    async def handle(event):
+        if event.text == "dropped":
+            fake.events.append(event)  # Hermes drops it: no session, no completion hook
+            return
+        await original(event)
+    adapter.handle_message = handle
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        first = await (await ask(client, call_id, "dropped")).json()
+        return first, await (await ask(client, call_id, "hello")).json()
+    first, second = run(app, scenario)
+    assert "stopped it" in first["response"]["error"]
+    assert second["response"]["result"] == "Answer: hello"
+
+
+def test_a_question_while_the_gateway_is_still_starting_says_so(server, monkeypatch):
+    adapter, fake, app = server
+    monkeypatch.setattr(lens, "STOPPING_GRACE_SECONDS", 0.3)
+    adapter.gateway_runner = SimpleNamespace(_startup_restore_in_progress=True)
+
+    async def scenario(client):
+        return await (await ask(client, await start_call(client), "hello")).json()
+    assert "still starting" in run(app, scenario)["response"]["error"]
+    assert fake.events == []
+
+
 def test_a_turn_that_never_winds_down_gets_a_plain_answer_not_a_lost_question(server, monkeypatch):
     adapter, fake, app = server
     monkeypatch.setattr(lens, "ASK_TIMEOUT_SECONDS", 0.3)
     monkeypatch.setattr(lens, "STOPPING_GRACE_SECONDS", 0.3)
+    original = fake.handle
+
+    async def handle(event):  # like real Hermes: a running turn holds the chat
+        if event.text == "slow job":
+            adapter._active_sessions[f"agent:main:hermes_lens:dm:{event.source.chat_id}"] = asyncio.Event()
+        await original(event)
+    adapter.handle_message = handle
 
     async def scenario(client):
         call_id = await start_call(client)
