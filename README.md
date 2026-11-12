@@ -18,7 +18,7 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. 0.5.0 makes the plugin and the app harder to confuse (gateway
 > restarts, declines, talking over a request) and adds a setup code. It was tested on Hermes
-> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. 84 plugin tests and 80 app-core
+> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. 84 plugin tests and 89 app-core
 > tests; `hermes plugins validate` passes with one warning (it uses Hermes's approval module).
 
 <p align="center">
@@ -143,8 +143,9 @@ sequenceDiagram
 
 - **Only a tap approves.** When Hermes wants to do something gated (a risky command, or starting
   or changing a background job from the glasses), the phone shows an **Approve / Decline** card.
-  You tap it, or give the glasses touchpad a deliberate double tap once the card has been on
-  screen for 1.5 seconds. A card for a request you talked over can only be approved on screen. A spoken "yes" never counts, and a call never grants a standing approval.
+  You tap it, or give the glasses touchpad a deliberate double tap once Luna has told you about
+  the card, it has been on screen for 1.5 seconds and your microphone is on (a double tap while
+  muted only unmutes). A card for a request you talked over can only be approved on screen. A spoken "yes" never counts, and a call never grants a standing approval.
 - **The card shows the action itself.** For a background job: when it runs, where its result goes,
   the whole instruction and every other argument. A single argument past 1,200 characters, or a
   whole card past 2,000, is marked as cut with the number of characters not shown, and the card
