@@ -70,15 +70,19 @@ install of Hermes can time out reading its own version and skip plugins that nee
 
 `hermes lens setup` creates the access token, asks for your Gemini key if it is not set (input
 hidden), checks that the key can use the Live model, checks that the gateway serves the plugin,
-and, with Tailscale installed, finds your tailnet address. It then prints exactly what to type into
-the app. To reach the plugin from the phone over HTTPS on your tailnet only:
+and, with Tailscale installed, finds your tailnet address. It then prints what the app needs: the
+server address and token, and, when it knows your tailnet address, a QR code to scan with the
+iPhone camera (it opens Luna with both filled in, after you confirm the server) and the same as a
+setup code to paste. To reach the plugin from the phone over HTTPS on your tailnet only:
 
 ```bash
 tailscale serve --bg --https=8443 http://127.0.0.1:8795
 ```
 
-In the app, enter the server address and token that `setup` printed, connect the glasses with
-**Set up with Meta AI**, then tap **Talk to Luna**.
+In the app, scan the QR code or paste the setup code (or type the server address and token),
+connect the glasses with **Set up with Meta AI**, then tap **Talk to Luna**. Run
+`hermes lens setup --show-token` to see the token, QR code and setup code again; anyone holding
+them can talk to your agent.
 
 ### Try it without glasses
 
@@ -139,10 +143,12 @@ sequenceDiagram
   You tap it, or give the glasses touchpad a deliberate double tap once the card has been on
   screen for 1.5 seconds. A spoken "yes" never counts, and a call never grants a standing approval.
 - **The card shows the action itself.** For a background job: when it runs, where its result goes,
-  the whole instruction and every other argument. Text past 2,000 characters is marked as cut,
-  with the number of characters not shown.
+  the whole instruction and every other argument. A single argument past 1,200 characters, or a
+  whole card past 2,000, is marked as cut with the number of characters not shown, and the card
+  says to decline if unsure.
 - **Silence is a no.** Unanswered cards are denied after two minutes, and hanging up denies them at
-  once. With no live call to show a card on, the plugin denies.
+  once. With no live call to show a card on, the plugin denies. Declining also stops the rest of
+  that request, so your agent cannot carry on another way while nobody is listening.
 - **The tap rule.** A `pre_tool_call` hook holds background jobs started from the glasses for your
   tap, even where Hermes would not ask. It uses Hermes's own approval gate, so if you run Hermes
   with approvals switched off (yolo mode, or `approvals.mode: off`), Hermes approves by itself and

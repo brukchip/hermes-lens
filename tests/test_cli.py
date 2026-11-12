@@ -202,6 +202,35 @@ def test_try_points_at_the_gemini_key_when_no_call_token_is_issued(env):
     assert "hermes lens setup" in lines[0] and "Gemini" in lines[0]
 
 
+def test_the_setup_code_carries_the_address_and_token_in_the_agreed_format():
+    code = cli.setup_code("https://box.tail1.ts.net:8443", "k" * 40)
+    assert code.startswith("HL1-") and "=" not in code
+    import base64
+    raw = code[4:] + "=" * (-len(code[4:]) % 4)
+    assert json.loads(base64.urlsafe_b64decode(raw)) == {"s": "https://box.tail1.ts.net:8443", "t": "k" * 40}
+
+
+def test_the_setup_code_is_shown_only_with_the_token(env, monkeypatch):
+    monkeypatch.setattr(cli, "tailscale_address", lambda port, https_port, run: ("https://box.tail1.ts.net:8443", True))
+    monkeypatch.setattr(cli, "terminal_qr", lambda text: "QR[" + text[:24] + "]")
+    env.values.update(HERMES_LENS_TOKEN="k" * 40, GEMINI_API_KEY="g")
+    http = Http({("GET", "/models/gemini-x-live"): (200, {}), ("GET", "/health"): (200, {})})
+    hidden, shown = [], []
+    cli.setup(args(), request=http, interactive=False, out=hidden.append)
+    cli.setup(args(show_token=True), request=http, interactive=False, out=shown.append)
+    code = cli.setup_code("https://box.tail1.ts.net:8443", "k" * 40)
+    assert "HL1-" not in "\n".join(hidden) and "QR[" not in "\n".join(hidden)
+    assert f"  Setup code      {code}" in shown and "QR[hermeslens://setup?code=" in "\n".join(shown)
+
+
+def test_no_setup_code_without_a_known_https_address(env):
+    env.values.update(HERMES_LENS_TOKEN="k" * 40, GEMINI_API_KEY="g")
+    http = Http({("GET", "/models/gemini-x-live"): (200, {}), ("GET", "/health"): (200, {})})
+    lines = []
+    cli.setup(args(show_token=True), request=http, interactive=False, out=lines.append)
+    assert "HL1-" not in "\n".join(lines) and "k" * 40 in "\n".join(lines)
+
+
 def test_the_command_is_registered_when_hermes_supports_it():
     seen = []
     cli.register(SimpleNamespace(register_cli_command=lambda name, **kw: seen.append((name, kw["handler_fn"]))))

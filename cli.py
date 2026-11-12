@@ -11,7 +11,9 @@ read-only request to Google to check the key and model. It never prints the Gemi
 """
 from __future__ import annotations
 
+import base64
 import getpass
+import io
 import ipaddress
 import json
 import re
@@ -28,6 +30,8 @@ from . import grant
 
 MODELS_API = "https://generativelanguage.googleapis.com/v1beta/models/"
 DEFAULT_HTTPS_PORT = 8443
+SETUP_CODE_PREFIX = "HL1-"
+SETUP_LINK = "hermeslens://setup?code="
 TOKEN_BYTES = 32
 
 Http = Callable[..., tuple]  # (method, url, headers, body, timeout) -> (status, dict | None)
@@ -54,6 +58,29 @@ def clean_key(raw: str) -> str:
     that still cannot be a key, so it is never saved or sent."""
     key = "".join(_TERMINAL_CODES.sub("", raw or "").split()).strip("\"'")
     return key if key.isascii() and key.isprintable() else ""
+
+
+def setup_code(address: str, token: str) -> str:
+    """The server address and token as one code the app can paste or scan:
+    "HL1-" + base64url (no padding) of {"s": address, "t": token}. It holds the token, so it is
+    shown only when the token itself is."""
+    raw = json.dumps({"s": address, "t": token}, separators=(",", ":")).encode()
+    return SETUP_CODE_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def terminal_qr(text: str) -> str:
+    """A QR code drawn with text, using the qrcode package Hermes's messaging extra already
+    ships; "" when it is missing (the code is printed anyway)."""
+    try:
+        import qrcode  # type: ignore[import-untyped]
+    except ImportError:
+        return ""
+    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=1, border=1)
+    qr.add_data(text)
+    qr.make(fit=True)
+    buffer = io.StringIO()
+    qr.print_ascii(out=buffer, invert=True)
+    return buffer.getvalue()
 
 
 def http(method: str, url: str, headers: Optional[dict] = None, body: Optional[dict] = None,
@@ -216,9 +243,19 @@ def setup(args, *, request: Http = http, run=subprocess.run, ask=getpass.getpass
     out(f"  Server address  {address or 'https://<your-machine>.<tailnet>.ts.net:' + str(https_port)}")
     if new_token or getattr(args, "show_token", False):
         out(f"  Access token    {token}")
-        out("  Keep the token secret: anyone holding it can talk to your agent.")
+        if address:
+            code = setup_code(address, token)
+            out("")
+            out("Or scan this with the iPhone camera to fill both in (it opens Luna), or paste the")
+            out("setup code in the app:")
+            qr = terminal_qr(SETUP_LINK + code)
+            if qr:
+                out(qr.rstrip("\n"))
+            out(f"  Setup code      {code}")
+        out("  Keep the token and the setup code secret: anyone holding them can talk to your agent.")
     else:
-        out("  Access token    (unchanged; run `hermes lens setup --show-token` to print it)")
+        out("  Access token    (unchanged; run `hermes lens setup --show-token` to print it")
+        out("                  and a setup code to paste or scan)")
     out("")
     out("Then try it without glasses: hermes lens try \"What can you do for me?\"")
     return 1 if problems else 0
