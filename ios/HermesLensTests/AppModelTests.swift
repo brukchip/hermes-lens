@@ -38,7 +38,7 @@ import UIKit
     #expect(call.state.transcript.contains("desk"))
     call.ask("Send a message to Sam")
     try await Task.sleep(for: .seconds(1.5))
-    #expect(call.approval != nil && call.approvalShownAt != nil)
+    #expect(call.approval != nil && call.approvalArrivedAt != nil)
     call.decideApproval(false)
     #expect(call.approval == nil)
     #expect(call.state.transcript.contains("cancelled"))
