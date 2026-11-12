@@ -332,7 +332,7 @@ def _explain(status: int, body) -> str:
     if status == 429 and code:
         return f"{code} (rate or daily limit)"
     if code == "native_provider_key_rejected":
-        return "Google refused the Gemini key; check it with `hermes lens setup`"
+        return "Google refused the call request; check the Gemini key and model with `hermes lens setup`"
     if code == "native_provider_unavailable":
         return ("Gemini did not issue a call token (busy or unreachable); try again, and if it "
                 "keeps failing check the key and model with `hermes lens setup`")

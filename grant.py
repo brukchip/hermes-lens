@@ -209,7 +209,8 @@ class CallBroker:
                 logger.warning("hermes_lens grant rejected status=%d", status)
                 call.settled = True
                 await asyncio.to_thread(self._usage.settle, call.reservation_id, 0)
-                # 400/401/403: Google refused the key itself; anything else may pass on its own.
+                # 400/401/403: Google refused the request (a bad key, or a model the key can't use);
+                # anything else (busy, unreachable) may pass on its own.
                 raise GrantError(503, "native_provider_key_rejected" if status in (400, 401, 403)
                                  else "native_provider_unavailable")
             token = data.get("name") if isinstance(data, dict) else None

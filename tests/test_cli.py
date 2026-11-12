@@ -204,7 +204,7 @@ def test_try_points_at_the_gemini_key_when_no_call_token_is_issued(env):
     rejected = (503, {"error": {"code": "native_provider_key_rejected"}})
     cli.try_request(SimpleNamespace(request=["hi"], server=None),
                     request=Http({("POST", "/v1/lens/realtime/calls"): rejected}), out=lines.append)
-    assert "refused the Gemini key" in lines[0]
+    assert "refused the call request" in lines[0] and "key and model" in lines[0]
 
 
 def test_the_setup_code_carries_the_address_and_token_in_the_agreed_format():
