@@ -29,6 +29,9 @@ public struct LunaTranscriptLog: Equatable, Sendable {
     /// next: more of Luna's answer means it was late (it joins the question); an interruption
     /// or the end of her turn means a new utterance.
     private var pending = ""
+    /// Index in `committed` of the question Luna is answering now; nil when her current
+    /// answer followed no question in this turn (she spoke first, or an update).
+    private var questionIndex: Int?
 
     public init() {}
 
@@ -63,7 +66,11 @@ public struct LunaTranscriptLog: Equatable, Sendable {
     /// Part of what Luna is saying. The user's question before it is finished, and words that
     /// arrived during her answer without interrupting it were the late tail of that question.
     public mutating func luna(_ text: String) {
-        commitUser()
+        if said.isEmpty { questionIndex = nil }  // a new answer begins
+        if let entry = Self.entry(.you, heard) {
+            append(entry); questionIndex = committed.count - 1
+        }
+        heard = ""
         if !pending.isEmpty { joinLateWords() }
         said = String((said + text).prefix(Self.maxEntryCharacters))
     }
@@ -71,14 +78,14 @@ public struct LunaTranscriptLog: Equatable, Sendable {
     /// Luna was cut off: what she said so far is final, and words heard during her answer
     /// begin the user's new utterance, which may still go on.
     public mutating func lunaStopped() {
-        commitLuna()
+        commitLuna(); questionIndex = nil
         startUtteranceFromPending()
     }
 
     /// The turn is complete: both sides are final. Words that came during Luna's answer and
     /// were not followed by more of it begin a new utterance.
     public mutating func turnEnded() {
-        commitUser(); commitLuna()
+        commitUser(); commitLuna(); questionIndex = nil
         startUtteranceFromPending()
     }
 
@@ -87,13 +94,17 @@ public struct LunaTranscriptLog: Equatable, Sendable {
         heard = String((heard + pending).prefix(Self.maxEntryCharacters)); pending = ""
     }
 
-    /// Appends late words to the user's last utterance (the one before Luna's current answer).
+    /// Appends late words to the question Luna is answering now, never to an older turn's.
+    /// When her answer followed no question in this turn, the words are kept as their own
+    /// utterance instead.
     private mutating func joinLateWords() {
         defer { pending = "" }
-        guard let index = committed.lastIndex(where: { $0.speaker == .you }),
-              let joined = Self.entry(.you, String((committed[index].text + pending).prefix(Self.maxEntryCharacters)))
-        else { return }
-        committed[index] = joined
+        if let index = questionIndex, committed.indices.contains(index),
+           let joined = Self.entry(.you, String((committed[index].text + pending).prefix(Self.maxEntryCharacters))) {
+            committed[index] = joined
+        } else if let entry = Self.entry(.you, pending) {
+            append(entry)
+        }
     }
 
     private mutating func commitUser() {
@@ -108,7 +119,11 @@ public struct LunaTranscriptLog: Equatable, Sendable {
 
     private mutating func append(_ entry: Entry) {
         committed.append(entry)
-        if committed.count > Self.maxEntries { committed.removeFirst(committed.count - Self.maxEntries) }
+        if committed.count > Self.maxEntries {
+            let dropped = committed.count - Self.maxEntries
+            committed.removeFirst(dropped)
+            questionIndex = questionIndex.flatMap { $0 >= dropped ? $0 - dropped : nil }
+        }
     }
 
     private static func entry(_ speaker: Speaker, _ text: String) -> Entry? {

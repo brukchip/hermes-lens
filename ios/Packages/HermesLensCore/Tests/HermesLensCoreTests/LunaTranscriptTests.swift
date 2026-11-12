@@ -130,3 +130,21 @@ private let pcm = Data(repeating: 12, count: 960)
     log.luna("Sure.")
     #expect(log.entries.map(\.text) == ["Hi", "Hello!", "One more thing about tomorrow", "Sure."])
 }
+
+@Test func lateWordsJoinOnlyTheQuestionOfThisTurn() {
+    // Luna speaks first (no question this turn): words during her answer are kept, not lost.
+    var first = LunaTranscriptLog()
+    first.luna("Hi, I'm Luna.")
+    first.user(" Hello")
+    first.luna(" How can I help?")
+    first.turnEnded()
+    #expect(first.entries.map(\.text) == ["Hello", "Hi, I'm Luna. How can I help?"])
+    // An update after an earlier turn: late words never join the older turn's question.
+    var later = LunaTranscriptLog()
+    later.user("What's the time?"); later.luna("Three."); later.turnEnded()
+    later.luna("Your report is ready.")
+    later.user(" thanks")
+    later.luna(" It's in your inbox.")
+    later.turnEnded()
+    #expect(later.entries.map(\.text) == ["What's the time?", "Three.", "thanks", "Your report is ready. It's in your inbox."])
+}
