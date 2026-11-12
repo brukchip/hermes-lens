@@ -199,6 +199,7 @@ final class AppModel {
         do {
             lensConfiguration = try await hermesClient.lensConfiguration()
             hasServerConfiguration = true
+            serverProblem = nil  // the server answered with this token: an earlier problem is over
             Self.cacheLensConfiguration(lensConfiguration)
         } catch {
             // Keep the last valid configuration (or the fail-safe defaults).
