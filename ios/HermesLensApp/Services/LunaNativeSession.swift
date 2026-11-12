@@ -103,12 +103,12 @@ final class LunaNativeSession {
     /// Tools in flight (look, record, back office), shown as chips on Home.
     private(set) var tools: [LunaToolActivity] = []
     var activeTools: Int { tools.count }
+    /// The approval card on screen and what the double-tap rule knows about it
+    /// (`LunaApprovalSlot`: when it arrived and became visible, whether Luna has announced
+    /// it, whether it is button-only).
+    private(set) var approvalSlot = LunaApprovalSlot()
     /// When the server issued the current approval card (its countdown runs from here).
-    private(set) var approvalArrivedAt: Date?
-    /// When the current card actually became visible (the double-tap guard runs from here).
-    @ObservationIgnored private var approvalVisibleSince: Date?
-    /// The current card came from a talked-over request: only the on-screen button approves it.
-    @ObservationIgnored private var approvalFromTalkedOver = false
+    var approvalArrivedAt: Date? { approvalSlot.arrivedAt }
     /// The conversation so far, kept in memory and handed to the call record at End.
     var turns: [LunaCallTurn] { [LunaCallTurn](state.log) }
     /// Actions the user approved or declined during this call.
@@ -121,7 +121,7 @@ final class LunaNativeSession {
     /// The grant locked in `ask_luna`, so the user's Hermes agent and its tools are reachable.
     private(set) var toolsAvailable = false
     /// An action Hermes wants to take, waiting for the user's tap. Never approved by voice.
-    private(set) var approval: LunaNativeToolResult.Approval?
+    var approval: LunaNativeToolResult.Approval? { approvalSlot.card }
     private(set) var approvalBusy = false
     /// A contact Luna read from a card, waiting for the user's check in Apple's sheet.
     /// Kept after the call ends so they can still save it.
@@ -347,7 +347,10 @@ final class LunaNativeSession {
             return
         default: break
         }
+        let wasResponding = state.responseInProgress
         let shouldPlay = state.receive(event, generation: generation)
+        // Luna began a new spoken response: a card already on screen counts as announced.
+        if !wasResponding, state.responseInProgress { approvalSlot.lunaStartedSpeaking(at: .now) }
         if state.phase == .failed { throw LunaNativeError.audioBacklog }
         if case .audio(let data) = event, shouldPlay {
             if firstOutputInTurn {
@@ -595,7 +598,7 @@ final class LunaNativeSession {
                 self.fail(LunaNativeError.connection, reason: "tool_response_send", underlying: error); return
             }
             if let approval = result.approval {
-                self.showApproval(approval, arrivedAt: .now, fromTalkedOver: false); outcome = "needs_approval"
+                self.showApproval(approval, arrivedAt: .now, source: .answer); outcome = "needs_approval"
                 #if DEBUG
                 // Self-test only: exercise the card path by declining. Never approves.
                 if LunaSelfTest.flag("-LunaAutoDecline") {
@@ -655,7 +658,7 @@ final class LunaNativeSession {
             guard generation == state.generation,
                   [.listening, .responding, .speaking].contains(state.phase) else { return false }
             if !hasLiveApproval, !approvalBusy {
-                showApproval(card, arrivedAt: arrivedAt, fromTalkedOver: true)
+                showApproval(card, arrivedAt: arrivedAt, source: .talkedOver)
                 return true
             }
             if LunaNativeVoice.approvalSecondsLeft(shownAt: arrivedAt) <= 0 { break }
@@ -739,28 +742,18 @@ final class LunaNativeSession {
         name == LunaNativeVoice.toolName || LunaNativeVoice.localTools.contains(name) ? name : "unknown"
     }
 
-    private func showApproval(_ card: LunaNativeToolResult.Approval, arrivedAt: Date, fromTalkedOver: Bool) {
-        approval = card; approvalArrivedAt = arrivedAt
-        approvalVisibleSince = .now; approvalFromTalkedOver = fromTalkedOver
+    private func showApproval(_ card: LunaNativeToolResult.Approval, arrivedAt: Date, source: LunaApprovalSlot.Source) {
+        approvalSlot.show(card, arrivedAt: arrivedAt, now: .now, source: source)
     }
 
-    private func clearApproval() {
-        approval = nil; approvalArrivedAt = nil; approvalVisibleSince = nil; approvalFromTalkedOver = false
-    }
+    private func clearApproval() { approvalSlot.clear() }
 
-    func gestureMayApprove(now: Date) -> Bool {
-        LunaApprovalGesture.mayApprove(
-            visibleSince: approval == nil ? nil : approvalVisibleSince, now: now,
-            fromTalkedOverRequest: approvalFromTalkedOver, busy: approvalBusy,
-            secondsLeft: approvalArrivedAt.map { LunaNativeVoice.approvalSecondsLeft(shownAt: $0, now: now) } ?? 0)
+    func approvalGesture(now: Date) -> LunaApprovalGesture.Verdict {
+        approvalSlot.gesture(now: now, busy: approvalBusy, muted: state.isMuted)
     }
 
     /// A card is up that can still be answered (an expired one stays, disabled, until replaced).
-    private var hasLiveApproval: Bool {
-        guard approval != nil else { return false }
-        guard let shown = approvalArrivedAt else { return true }
-        return LunaNativeVoice.approvalSecondsLeft(shownAt: shown) > 0
-    }
+    private var hasLiveApproval: Bool { approvalSlot.isLive(now: .now) }
 
     /// The user's tap on the approval card. The result (or the next card) comes back and
     /// is handed to Luna to say; the voice model itself can never approve.
@@ -795,7 +788,7 @@ final class LunaNativeSession {
             self.approvalBusy = false
             if let next = result?.approval {
                 // A follow-up card keeps the gesture rule of the card it continues.
-                self.showApproval(next, arrivedAt: .now, fromTalkedOver: self.approvalFromTalkedOver)
+                self.showApproval(next, arrivedAt: .now, source: .followUp)
             } else {
                 self.clearApproval()
             }

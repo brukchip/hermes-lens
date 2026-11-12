@@ -64,8 +64,8 @@ protocol LunaCall: AnyObject {
     var approvalBusy: Bool { get }
     /// When the server issued the current card (its two-minute countdown runs from here).
     var approvalArrivedAt: Date? { get }
-    /// True when a glasses double tap may approve the current card (`LunaApprovalGesture`).
-    func gestureMayApprove(now: Date) -> Bool
+    /// What a glasses double tap would do with the current card (`LunaApprovalGesture`).
+    func approvalGesture(now: Date) -> LunaApprovalGesture.Verdict
     /// A contact Luna read from a card, waiting for the user to check and save.
     var contactDraft: LunaContactDraft? { get }
     /// False when the call failed for a reason an immediate retry cannot fix.
@@ -236,10 +236,12 @@ final class LunaDemoCall: LunaCall {
 
     func finishContact(saved: Bool) {}
 
-    func gestureMayApprove(now: Date) -> Bool {
-        LunaApprovalGesture.mayApprove(
-            visibleSince: approvalArrivedAt, now: now, fromTalkedOverRequest: false, busy: approvalBusy,
-            secondsLeft: approvalArrivedAt.map { LunaNativeVoice.approvalSecondsLeft(shownAt: $0, now: now) } ?? 0)
+    /// The demo announces its card in the same breath as showing it.
+    func approvalGesture(now: Date) -> LunaApprovalGesture.Verdict {
+        LunaApprovalGesture.verdict(
+            visibleSince: approval == nil ? nil : approvalArrivedAt, now: now, buttonOnly: false, busy: approvalBusy,
+            secondsLeft: approvalArrivedAt.map { LunaNativeVoice.approvalSecondsLeft(shownAt: $0, now: now) } ?? 0,
+            muted: state.isMuted, announced: true)
     }
 
     private func speak(_ text: String, generation: UUID) {
@@ -285,7 +287,7 @@ final class LunaUnavailableCall: LunaCall {
     func decideApproval(_ approve: Bool) {}
     func finishContact(saved: Bool) {}
     func ask(_ text: String) {}
-    func gestureMayApprove(now: Date) -> Bool { false }
+    func approvalGesture(now: Date) -> LunaApprovalGesture.Verdict { .noCard }
 }
 
 extension EnvironmentValues {
