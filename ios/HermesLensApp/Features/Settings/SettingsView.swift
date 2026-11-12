@@ -159,6 +159,8 @@ struct SettingsView: View {
         }
         .task(id: model.glassesRegistrationState) { cameraAllowed = await model.glassesCameraPermission() }
         .navigationTitle("You")
+        // Leaving Settings without "Save and connect" keeps a typed address and token.
+        .onDisappear { Task { await model.commitServerFields() } }
         .navigationBarTitleDisplayMode(.large)
         .lunaFormChrome()
         .confirmationDialog("Disconnect Luna from glasses?", isPresented: $confirmsDisconnect,

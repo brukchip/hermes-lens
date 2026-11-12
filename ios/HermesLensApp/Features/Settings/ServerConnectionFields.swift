@@ -20,6 +20,7 @@ struct ServerConnectionFields: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .accessibilityIdentifier("settings.server.token")
+            .onSubmit { Task { await model.commitServerFields() } }
         Button {
             Task { await connect() }
         } label: {

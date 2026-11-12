@@ -81,8 +81,30 @@ final class AppModel {
         await checkConnection()
     }
 
+    /// Keeps a server address and token the user typed but left without "Save and connect"
+    /// (onboarding's Continue, Skip or a swipe, or leaving Settings): the token goes to
+    /// Keychain and Luna reconnects with them. Nothing happens when nothing changed.
+    func commitServerFields() async {
+        settings.bridgeURL = settings.bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.accessToken = settings.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokenChanged = settings.hasUnsavedAccessToken
+        guard tokenChanged || servicesEndpoint != settings.bridgeURL else { return }
+        if tokenChanged {
+            do { try settings.saveAccessToken() } catch {
+                errorMessage = "The token could not be saved to Keychain."
+                return
+            }
+        }
+        rebuildServices()
+        await refreshReadiness()
+    }
+
+    /// The server address the current client was built for.
+    @ObservationIgnored private var servicesEndpoint: String?
+
     func rebuildServices() {
         endpointProblem = nil
+        servicesEndpoint = settings.bridgeURL
         if settings.usesMockHermes {
             hermesClient = MockHermesClient()
         } else {

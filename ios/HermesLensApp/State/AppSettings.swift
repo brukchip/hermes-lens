@@ -43,6 +43,8 @@ final class AppSettings {
     }
     let deviceID: UUID
     var accessToken: String
+    /// The token as it is in Keychain, to tell a typed but unsaved token apart.
+    @ObservationIgnored private var savedAccessToken: String
 
     init(
         defaults: UserDefaults = .standard,
@@ -78,8 +80,13 @@ final class AppSettings {
             deviceID = id
             defaults.set(id.uuidString, forKey: Key.deviceID)
         }
-        accessToken = (try? secureStore.value(for: "hermes-server-token")) ?? ""
+        let token = (try? secureStore.value(for: "hermes-server-token")) ?? ""
+        accessToken = token
+        savedAccessToken = token
     }
+
+    /// The token field differs from what Keychain holds.
+    var hasUnsavedAccessToken: Bool { accessToken != savedAccessToken }
 
     /// True once a server address and an access token are both entered.
     var hasServerConfiguration: Bool {
@@ -89,5 +96,6 @@ final class AppSettings {
 
     func saveAccessToken() throws {
         try secureStore.set(accessToken, for: "hermes-server-token")
+        savedAccessToken = accessToken
     }
 }

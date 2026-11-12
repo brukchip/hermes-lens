@@ -19,6 +19,10 @@ struct LunaOnboardingView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .onChange(of: page) { old, _ in
+                // Leaving the server page by Continue, Set up later or a swipe keeps the token.
+                if old == 1 { Task { await model.commitServerFields() } }
+            }
         }
         .overlay(alignment: .topTrailing) {
             Button("Skip") { finish() }
@@ -159,6 +163,7 @@ struct LunaOnboardingView: View {
     }
 
     private func finish() {
+        if page == 1 { Task { await model.commitServerFields() } }
         model.settings.hasCompletedOnboarding = true
     }
 }
