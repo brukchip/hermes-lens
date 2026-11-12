@@ -152,6 +152,8 @@ final class LunaNativeSession {
     @ObservationIgnored private var setupDeadline: Task<Void, Never>?
     @ObservationIgnored private var durationDeadline: Task<Void, Never>?
     @ObservationIgnored private var endingWarning: Task<Void, Never>?
+    /// Removes the current card a few seconds after it expires, and tells Luna.
+    @ObservationIgnored private var approvalExpiry: Task<Void, Never>?
     @ObservationIgnored private var turnDeadline: Task<Void, Never>?
     @ObservationIgnored private var writeDeadline: Task<Void, Never>?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -747,9 +749,32 @@ final class LunaNativeSession {
 
     private func showApproval(_ card: LunaNativeToolResult.Approval, arrivedAt: Date, source: LunaApprovalSlot.Source) {
         approvalSlot.show(card, arrivedAt: arrivedAt, now: .now, source: source)
+        scheduleApprovalExpiry(card, generation: state.generation)
     }
 
-    private func clearApproval() { approvalSlot.clear() }
+    private func clearApproval() { approvalExpiry?.cancel(); approvalExpiry = nil; approvalSlot.clear() }
+
+    /// An unanswered card reads "Expired" for a few seconds (`LunaApprovalSlot.expiredLinger`)
+    /// and then goes; Luna is told that nothing was done. A card being answered is left alone.
+    private func scheduleApprovalExpiry(_ card: LunaNativeToolResult.Approval, generation: UUID) {
+        approvalExpiry?.cancel()
+        approvalExpiry = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, generation == self.state.generation,
+                      self.approvalSlot.card?.id == card.id else { return }
+                guard self.approvalSlot.shouldRemoveExpired(now: .now), !self.approvalBusy else { continue }
+                self.approvalSlot.clear(); self.approvalExpiry = nil
+                self.actions.append(LunaCallAction(summary: card.summary, approved: false))
+                self.trace("approval.expired", detail: "tapped=false")
+                guard let socket = self.socket else { return }
+                try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's phone] The approval card for: "
+                    + "\(card.summary) expired before the user tapped it, so nothing was done. Tell them in one short "
+                    + "sentence; they can ask again."))
+                return
+            }
+        }
+    }
 
     func approvalGesture(now: Date) -> LunaApprovalGesture.Verdict {
         approvalSlot.gesture(now: now, busy: approvalBusy, muted: state.isMuted)
