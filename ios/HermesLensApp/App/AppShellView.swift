@@ -311,7 +311,7 @@ struct AppShellView: View {
         } else if model.lensConfiguration.supportsNativeVoice,
                   let url = URL(string: model.settings.bridgeURL),
                   let configuration = try? HermesEndpointConfiguration(
-                      baseURL: url, token: model.settings.accessToken,
+                      baseURL: url, token: model.settings.tokenInUse,
                       sessionKey: model.settings.sessionKey, deviceID: model.settings.deviceID) {
             path = "native"
             call = LunaNativeSession(coordinator: audioCoordinator, configuration: configuration,

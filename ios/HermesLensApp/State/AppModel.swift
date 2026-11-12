@@ -99,7 +99,7 @@ final class AppModel {
             setupPrompt = .replaceToken
             return
         }
-        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.accessToken else { return }
+        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.tokenInUse else { return }
         rebuildServices()
         await refreshReadiness()
     }
@@ -113,7 +113,7 @@ final class AppModel {
         } else {
             settings.restoreSavedAccessToken()
         }
-        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.accessToken else { return }
+        guard servicesEndpoint != settings.bridgeURL || servicesToken != settings.tokenInUse else { return }
         rebuildServices()
         await refreshReadiness()
     }
@@ -132,7 +132,7 @@ final class AppModel {
     func rebuildServices() {
         endpointProblem = nil
         servicesEndpoint = settings.bridgeURL
-        servicesToken = settings.accessToken
+        servicesToken = settings.tokenInUse
         if settings.usesMockHermes {
             hermesClient = MockHermesClient()
         } else {
@@ -140,7 +140,7 @@ final class AppModel {
                 guard let url = URL(string: settings.bridgeURL) else { throw HermesClientError.invalidBaseURL }
                 let configuration = try HermesEndpointConfiguration(
                     baseURL: url,
-                    token: settings.accessToken,
+                    token: settings.tokenInUse,
                     sessionKey: settings.sessionKey,
                     deviceID: settings.deviceID
                 )
