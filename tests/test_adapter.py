@@ -454,6 +454,48 @@ def test_a_question_after_a_stop_waits_for_the_stopped_turn_to_end(server, monke
     assert [e.text for e in fake.events] == ["slow job", "/stop", "hello"]
 
 
+def test_a_question_right_after_a_decline_waits_until_hermes_lets_go_of_the_chat(server, monkeypatch):
+    """Real Hermes reports a turn complete a moment before it releases the chat. A message sent
+    in that gap is queued as a follow-up and its completion is never reported, so an approved
+    action ran while the phone heard that it had been stopped."""
+    adapter, fake, app = server
+    monkeypatch.setattr(lens, "ASK_TIMEOUT_SECONDS", 1.0)
+    original = fake.handle
+
+    async def handle(event):
+        session = f"agent:main:hermes_lens:dm:{event.source.chat_id}"
+        if session in adapter._active_sessions:  # sent in the gap: queued, completion never reported
+            fake.events.append(event)
+            return
+        adapter._active_sessions[session] = asyncio.Event()
+        await original(event)  # the turn, then the completion hook ...
+        await asyncio.sleep(0.2)  # ... and only then does Hermes release the chat
+        del adapter._active_sessions[session]
+    adapter.handle_message = handle
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        card = (await (await ask(client, call_id, "send it")).json())["approval"]
+        await client.post("/v1/lens/native/approvals", headers=headers(), data=json.dumps(
+            {"callID": call_id, "approvalID": card["id"], "choice": "decline"}))
+        card = (await (await ask(client, call_id, "send it again")).json())["approval"]
+        tap = await client.post("/v1/lens/native/approvals", headers=headers(), data=json.dumps(
+            {"callID": call_id, "approvalID": card["id"], "choice": "approve"}))
+        return await tap.json()
+    assert run(app, scenario)["response"]["result"] == "Sent it to Sam."
+
+
+def test_a_chat_hermes_never_releases_gets_a_plain_answer(server, monkeypatch):
+    adapter, fake, app = server
+    monkeypatch.setattr(lens, "STOPPING_GRACE_SECONDS", 0.3)
+    adapter._active_sessions[f"agent:main:hermes_lens:dm:lens-{DEVICE}"] = asyncio.Event()
+
+    async def scenario(client):
+        return await (await ask(client, await start_call(client), "hello")).json()
+    assert "still finishing" in run(app, scenario)["response"]["error"]
+    assert fake.events == []
+
+
 def test_a_turn_that_never_winds_down_gets_a_plain_answer_not_a_lost_question(server, monkeypatch):
     adapter, fake, app = server
     monkeypatch.setattr(lens, "ASK_TIMEOUT_SECONDS", 0.3)

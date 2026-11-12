@@ -95,6 +95,34 @@ def test_a_typed_key_is_saved_and_never_echoed(env):
     assert env.values["GEMINI_API_KEY"] == "typed-key" and "typed-key" not in "\n".join(lines)
 
 
+def test_keys_pressed_at_the_hidden_prompt_are_not_saved_with_the_key(env):
+    """Arrow keys and a bracketed paste arrive as escape codes; Google answers 400 to a key that
+    carries them, which reads as a rejected key."""
+    http = Http({("GET", "/models/gemini-x-live"): (200, {})})
+    typed = "\x1b[B\x1b[C\x1b[200~ AQ.typed_key-1 \x1b[201~\n"
+    cli.setup(args(), request=http, interactive=True, ask=lambda prompt: typed, out=lambda line: None)
+    assert env.values["GEMINI_API_KEY"] == "AQ.typed_key-1"
+    assert http.calls[0][2] == {"x-goog-api-key": "AQ.typed_key-1"}
+
+
+def test_a_key_saved_with_escape_codes_is_repaired(env):
+    env.values.update(HERMES_LENS_TOKEN="k" * 40, GEMINI_API_KEY="\x1b[B\x1b[CAQ.saved")
+    http = Http({("GET", "/models/gemini-x-live"): (200, {}), ("GET", "/health"): (200, {})})
+    lines = []
+    assert cli.setup(args(), request=http, interactive=False, out=lines.append) == 0
+    assert env.values["GEMINI_API_KEY"] == "AQ.saved" and "AQ.saved" not in "\n".join(lines)
+    assert "Removed stray terminal characters" in "\n".join(lines)
+
+
+def test_text_that_cannot_be_a_key_is_not_saved_or_sent(env):
+    http = Http({("GET", "/health"): (0, None)})
+    lines = []
+    assert cli.setup(args(), request=http, interactive=True, ask=lambda prompt: "ключ", out=lines.append) == 1
+    assert "GEMINI_API_KEY" not in env.values and "did not look like an API key" in "\n".join(lines)
+    assert not [c for c in http.calls if "/models/" in c[1]]
+    assert cli.clean_key(' "AIza-quoted" ') == "AIza-quoted" and cli.clean_key("\x1bAQ.x") == "AQ.x"
+
+
 def test_tailscale_is_only_read_never_changed(env, monkeypatch):
     monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/tailscale")
     commands = []
@@ -163,6 +191,15 @@ def test_try_explains_a_gateway_that_is_not_running(env):
     assert cli.try_request(SimpleNamespace(request=["x"], server=None), request=Http({}),
                            interactive=False, out=lines.append) == 1
     assert "is the gateway running" in "\n".join(lines)
+
+
+def test_try_points_at_the_gemini_key_when_no_call_token_is_issued(env):
+    env.values["HERMES_LENS_TOKEN"] = "k" * 40
+    refused = (503, {"error": {"code": "native_provider_unavailable"}})
+    lines = []
+    assert cli.try_request(SimpleNamespace(request=["hi"], server=None),
+                           request=Http({("POST", "/v1/lens/realtime/calls"): refused}), out=lines.append) == 1
+    assert "hermes lens setup" in lines[0] and "Gemini" in lines[0]
 
 
 def test_the_command_is_registered_when_hermes_supports_it():

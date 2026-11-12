@@ -38,6 +38,7 @@ DEFAULT_PORT = 8795
 ASK_TIMEOUT_SECONDS = 60.0
 STOPPING_GRACE_SECONDS = 20.0  # how long a new question waits for a stopped turn to wind down
 STALE_TURN_SECONDS = 600.0  # a turn that never reported completion stops blocking after this
+RELEASE_POLL_SECONDS = 0.02  # how often to look whether Hermes has let go of the chat
 APPROVAL_TTL_SECONDS = 120.0
 RATE_LIMIT = (30, 60.0)  # requests per window per device
 GLOBAL_RATE_LIMIT = (120, 60.0)  # all devices together: the device id is self-asserted
@@ -442,17 +443,31 @@ class HermesLensAdapter(BasePlatformAdapter):
         self._spawn(self.handle_message(event))
 
     async def _previous_turn_finished(self, chat_id: str) -> bool:
-        """Wait briefly for the chat's previous Hermes turn (usually one just stopped) to end."""
+        """Wait briefly for the chat's previous Hermes turn (usually one just stopped or
+        declined) to end, and for Hermes to let go of the chat."""
+        deadline = time.monotonic() + STOPPING_GRACE_SECONDS
         running = self._lens_turns.get(chat_id)
-        if running is None:
-            return True
-        if time.monotonic() - running[1] > STALE_TURN_SECONDS:
-            self._lens_turns.pop(chat_id, None)
-            return True
+        if running is not None:
+            if time.monotonic() - running[1] > STALE_TURN_SECONDS:
+                self._lens_turns.pop(chat_id, None)
+                return True
+            try:
+                await asyncio.wait_for(running[2].wait(), STOPPING_GRACE_SECONDS)
+            except asyncio.TimeoutError:
+                return False
+        while self._hermes_holds(chat_id):
+            if time.monotonic() > deadline:
+                return False
+            await asyncio.sleep(RELEASE_POLL_SECONDS)
+        return True
+
+    def _hermes_holds(self, chat_id: str) -> bool:
+        """Hermes reports a turn complete a moment before it releases the chat. A message sent
+        in that gap is queued as a follow-up whose completion is never reported, so its answer
+        would reach nobody: the next request waits until the chat is free."""
         try:
-            await asyncio.wait_for(running[2].wait(), STOPPING_GRACE_SECONDS)
-            return True
-        except asyncio.TimeoutError:
+            return any(chat_id in str(key) for key in list(getattr(self, "_active_sessions", None) or ()))
+        except Exception:  # a core without this bookkeeping: behave as before
             return False
 
     def _spawn(self, coroutine) -> asyncio.Task:

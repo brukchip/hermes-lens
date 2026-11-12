@@ -14,6 +14,7 @@ from __future__ import annotations
 import getpass
 import ipaddress
 import json
+import re
 import secrets
 import shutil
 import subprocess
@@ -30,6 +31,8 @@ DEFAULT_HTTPS_PORT = 8443
 TOKEN_BYTES = 32
 
 Http = Callable[..., tuple]  # (method, url, headers, body, timeout) -> (status, dict | None)
+# What a terminal adds to a hidden prompt: arrow keys, bracketed paste, a stray Escape.
+_TERMINAL_CODES = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|[\x00-\x1f\x7f]")
 
 
 # ----- small helpers ------------------------------------------------------------------------------
@@ -43,6 +46,14 @@ def _env(name: str, default: str = "") -> str:
 def _save(name: str, value: str) -> None:
     from hermes_cli.config import save_env_value
     save_env_value(name, value)
+
+
+def clean_key(raw: str) -> str:
+    """A pasted API key without what the terminal or the clipboard put around it: escape codes
+    from keys pressed at the hidden prompt, quotes, spaces and line breaks. Returns "" for text
+    that still cannot be a key, so it is never saved or sent."""
+    key = "".join(_TERMINAL_CODES.sub("", raw or "").split()).strip("\"'")
+    return key if key.isascii() and key.isprintable() else ""
 
 
 def http(method: str, url: str, headers: Optional[dict] = None, body: Optional[dict] = None,
@@ -161,11 +172,18 @@ def setup(args, *, request: Http = http, run=subprocess.run, ask=getpass.getpass
         new_token = False
         out("✓ Access token is set (HERMES_LENS_TOKEN)")
 
-    key = _env("GEMINI_API_KEY")
+    saved = _env("GEMINI_API_KEY")
+    key = clean_key(saved)
+    if key and key != saved:  # a key saved by 0.4.0 with arrow-key codes in front of it
+        _save("GEMINI_API_KEY", key)
+        out("• Removed stray terminal characters from the saved Gemini key")
     if not key and interactive:
-        key = (ask("Gemini API key (https://aistudio.google.com/apikey, input hidden): ") or "").strip()
+        typed = ask("Gemini API key (https://aistudio.google.com/apikey, input hidden): ") or ""
+        key = clean_key(typed)
         if key:
             _save("GEMINI_API_KEY", key)
+        elif typed.strip():
+            out("• That did not look like an API key, so it was not saved. Paste it again.")
     if not key:
         problems += 1
         out("✗ GEMINI_API_KEY is not set: hermes config set GEMINI_API_KEY \"<your key>\"")
@@ -276,6 +294,8 @@ def _explain(status: int, body) -> str:
         return "the token does not match the gateway's; run `hermes gateway restart`"
     if status == 429 and code:
         return f"{code} (rate or daily limit)"
+    if code == "native_provider_unavailable":
+        return "Gemini did not issue a call token; check the key and model with `hermes lens setup`"
     return f"HTTP {status}" + (f" ({code})" if code else "")
 
 

@@ -14,10 +14,11 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 
 <p align="center"><a href="https://x.com/BrukInBetween/status/2120584742378557503"><b>▶ Watch the demo</b></a> · <a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="#faq">FAQ</a> · <a href="ios/README.md">iPhone app</a></p>
 
-> **Status: 0.4.0, tested on real glasses.** Used on Ray-Ban Meta glasses with an iPhone 13:
+> **Status: 0.4.1.** 0.4.0 was used on real Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. The approval card was tested end to end against a live gateway.
-> 67 plugin tests and 37 app-core tests; `hermes plugins validate` passes (security scan: safe).
+> 0.4.1 fixes setup and a timing problem found by installing from the catalog on Hermes 0.23.1.
+> 73 plugin tests and 37 app-core tests; `hermes plugins validate` passes (security scan: safe).
 
 <p align="center">
   <img src="docs/screens/home.png" width="270" alt="Home: glasses ready, Talk to Luna">
@@ -56,11 +57,16 @@ You need:
   [`tailscale serve`](https://tailscale.com/kb/1312/serve) in front of `127.0.0.1:8795`.
 
 ```bash
-hermes plugins install brukchip/hermes-lens --enable --yes-deps   # or `hermes-lens` once it is in the catalog
+hermes plugins install brukchip/hermes-lens --enable --yes-deps   # or `hermes-lens` from the Hermes catalog
 hermes lens setup          # creates the token, checks your Gemini key, tells you what is missing
 hermes gateway restart
 hermes lens setup          # run it again: every line should now show ✓
 ```
+
+Two things to know: with no gateway service installed, `hermes gateway restart` runs the gateway
+in that terminal, so leave it open and use a second one. And if Hermes answers `'lens' is not a
+hermes command` right after the install, run the command again: on a busy machine a source
+install of Hermes can time out reading its own version and skip plugins that need a newer one.
 
 `hermes lens setup` creates the access token, asks for your Gemini key if it is not set (input
 hidden), checks that the key can use the Live model, checks that the gateway serves the plugin,
