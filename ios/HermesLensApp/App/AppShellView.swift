@@ -322,8 +322,7 @@ struct AppShellView: View {
             recordVideo: { [model] in
                 guard model.settings.allowsCameraInCalls else { throw LunaCameraError(code: "camera_off_in_settings") }
                 if let blocker = model.glassesCameraBlocker { throw LunaCameraError(code: blocker) }
-                await model.holdGlassesCameraForCall()
-                guard await model.captureArtifact(kind: .video, request: "Video from a Luna call") != nil else {
+                guard await model.recordCallVideo() != nil else {
                     throw LunaCameraError(code: "video_glasses_\(model.glassesState)")
                 }
             },
