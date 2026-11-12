@@ -521,14 +521,14 @@ final class LunaNativeSession {
             // Asked again for what is still running from before a talk-over: that run answers it.
             trace("tool.adopted", detail: "name=\(Self.toolLabel(call.name))")
             return
-        case .answer(let finished):
+        case .answer(let finished, let cardSource):
             // The same request already finished while talked over: answer from its result.
             trace("tool.adopted", detail: "name=\(Self.toolLabel(call.name)) finished=true")
             Task { [weak self] in
                 guard (try? await socket.sendMessage(LunaNativeWire.toolResponse(
                     id: call.id, name: call.name, response: finished.response))) != nil else { return }
                 guard let self, let card = finished.approval else { return }
-                _ = await self.showTalkedOverCard(card, arrivedAt: .now, generation: generation)
+                _ = await self.showTalkedOverCard(card, arrivedAt: .now, source: cardSource, generation: generation)
             }
             return
         case .busy(let answer):
@@ -581,14 +581,15 @@ final class LunaNativeSession {
             guard !Task.isCancelled, let self, generation == self.state.generation else { return }
             self.toolTasks[call.id] = nil; self.toolCalls[call.id] = nil; self.tools.removeAll { $0.id == call.id }
             let answering: LunaNativeToolCall
+            let cardSource: LunaApprovalSlot.Source
             switch self.talkedOver.finish(call, result: result) {
             case .note:
                 self.deliverTalkedOver(call.id, hasCard: result.approval != nil, generation: generation)
                 self.trace("tool.detached_result", detail: "name=\(Self.toolLabel(call.name)) "
                     + "approval=\(result.approval != nil) ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
                 return
-            case .respond(let target):
-                answering = target
+            case .respond(let target, let source):
+                answering = target; cardSource = source
             }
             do {
                 try await socket.sendMessage(LunaNativeWire.toolResponse(id: answering.id, name: answering.name,
@@ -598,7 +599,7 @@ final class LunaNativeSession {
                 self.fail(LunaNativeError.connection, reason: "tool_response_send", underlying: error); return
             }
             if let approval = result.approval {
-                self.showApproval(approval, arrivedAt: .now, source: .answer); outcome = "needs_approval"
+                self.showApproval(approval, arrivedAt: .now, source: cardSource); outcome = "needs_approval"
                 #if DEBUG
                 // Self-test only: exercise the card path by declining. Never approves.
                 if LunaSelfTest.flag("-LunaAutoDecline") {
@@ -627,9 +628,10 @@ final class LunaNativeSession {
             var card: LunaNativeToolResult.Approval?
             var result: LunaNativeToolResult?
             if hasCard {
-                guard let taken = self.talkedOver.takeUndelivered(runID), let approval = taken.approval else { return }
-                guard await self.showTalkedOverCard(approval, arrivedAt: arrived, generation: generation) else { return }
-                result = taken; card = approval
+                guard let kept = self.talkedOver.takeUndelivered(runID), let approval = kept.result.approval else { return }
+                guard await self.showTalkedOverCard(approval, arrivedAt: arrived, source: kept.cardSource,
+                                                    generation: generation) else { return }
+                result = kept.result; card = approval
             }
             let started = ProcessInfo.processInfo.systemUptime
             while generation == self.state.generation, [.responding, .speaking].contains(self.state.phase),
@@ -638,7 +640,7 @@ final class LunaNativeSession {
             }
             guard generation == self.state.generation, self.state.phase == .listening
                     || [.responding, .speaking].contains(self.state.phase), let socket = self.socket else { return }
-            if !hasCard { result = self.talkedOver.takeUndelivered(runID) }
+            if !hasCard { result = self.talkedOver.takeUndelivered(runID)?.result }
             // A repeat already took the result.
             guard let result else { return }
             // The user already answered the card: their tap sent its own note.
@@ -653,12 +655,13 @@ final class LunaNativeSession {
     /// never dropped silently: if it expires while waiting, it is declined on the server
     /// (nothing happens), Luna is told, and the trace says so. True when it was shown.
     private func showTalkedOverCard(_ card: LunaNativeToolResult.Approval, arrivedAt: Date,
+                                    source: LunaApprovalSlot.Source,
                                     generation: UUID) async -> Bool {
         while true {
             guard generation == state.generation,
                   [.listening, .responding, .speaking].contains(state.phase) else { return false }
             if !hasLiveApproval, !approvalBusy {
-                showApproval(card, arrivedAt: arrivedAt, source: .talkedOver)
+                showApproval(card, arrivedAt: arrivedAt, source: source)
                 return true
             }
             if LunaNativeVoice.approvalSecondsLeft(shownAt: arrivedAt) <= 0 { break }
