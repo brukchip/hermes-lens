@@ -123,5 +123,17 @@ extension View {
             } message: {
                 Text(LunaSetupCode.invalidMessage)
             }
+            .alert(
+                "Replace the saved access token?",
+                isPresented: Binding(
+                    get: { model.setupPrompt == .replaceToken },
+                    set: { if !$0, model.setupPrompt == .replaceToken { Task { await model.answerTokenReplacement(replace: false) } } }
+                )
+            ) {
+                Button("Replace") { Task { await model.answerTokenReplacement(replace: true) } }
+                Button("Keep saved token", role: .cancel) { Task { await model.answerTokenReplacement(replace: false) } }
+            } message: {
+                Text("You typed a different access token. Luna uses the saved one until you replace it.")
+            }
     }
 }

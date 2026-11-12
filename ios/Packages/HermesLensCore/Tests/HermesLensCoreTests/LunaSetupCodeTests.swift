@@ -74,3 +74,11 @@ private func code(server: String = "https://lens.example.test", token: String = 
     #expect(LunaSetupCode.isSetupLink(try #require(URL(string: "hermeslens://setup?code=bad"))))
     #expect(LunaSetupCode.parse(link: try #require(URL(string: "hermeslens://setup?code=bad"))) == nil)
 }
+
+@Test func leavingTheTokenFieldNeverErasesOrSilentlyReplacesTheSavedToken() {
+    #expect(LunaTokenFieldDecision(field: "", saved: "") == .keep)
+    #expect(LunaTokenFieldDecision(field: token, saved: token) == .keep)
+    #expect(LunaTokenFieldDecision(field: "", saved: token) == .restoreSaved)
+    #expect(LunaTokenFieldDecision(field: token, saved: "") == .save)
+    #expect(LunaTokenFieldDecision(field: token + "x", saved: token) == .askBeforeReplacing)
+}

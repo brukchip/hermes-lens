@@ -73,3 +73,25 @@ public struct LunaSetupCode: Equatable, Sendable {
         return LunaSetupCode(server: url, token: token)
     }
 }
+
+/// What to do with the token field when the user leaves it without "Save and connect".
+/// An empty field never erases the saved token, and a different token never silently
+/// replaces a saved one: the user is asked first.
+public enum LunaTokenFieldDecision: Equatable, Sendable {
+    /// Nothing to save.
+    case keep
+    /// The field was cleared: put the saved token back (nothing is erased).
+    case restoreSaved
+    /// No token was saved yet: save this one.
+    case save
+    /// A different token would replace the saved one: ask first.
+    case askBeforeReplacing
+
+    /// `field` is the trimmed text in the field, `saved` the token in Keychain.
+    public init(field: String, saved: String) {
+        if field == saved { self = .keep }
+        else if field.isEmpty { self = .restoreSaved }
+        else if saved.isEmpty { self = .save }
+        else { self = .askBeforeReplacing }
+    }
+}
