@@ -105,7 +105,7 @@ public enum LunaNativeError: LocalizedError, Sendable {
         case .microphoneBusy: "A phone call, Siri or another app is using the microphone. Try again when it's free."
         case .microphoneSilent: "Luna can't hear the glasses microphone. Try again; if it keeps happening, switch the glasses off and on."
         case .wrongToken: "Luna's server didn't accept the access token. Check the token in Settings."
-        case .providerKeyRefused: "Google refused the Gemini key on your Hermes server. Run hermes lens setup on the server to enter a working key, then try again."
+        case .providerKeyRefused: "Google refused the call request. Check the Gemini key and model on your server with hermes lens setup, then try again."
         case .providerUnavailable: "Gemini isn't available right now. Try again in a moment."
         case .providerUnreachable: "Your Hermes server couldn't reach the live voice service. Try again in a moment."
         case .serverSetup: "Your Hermes server's voice settings aren't supported. Run hermes lens setup on the server, then try again."
