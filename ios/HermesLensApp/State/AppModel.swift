@@ -722,7 +722,39 @@ final class AppModel {
         (try? await glassesService.requestCameraPermission()) ?? false
     }
 
+    /// A setup link waiting for the user's Connect or Cancel, or a setup link that was invalid.
+    enum SetupLinkPrompt: Equatable {
+        case confirm(LunaSetupCode)
+        case invalid
+    }
+    var setupLinkPrompt: SetupLinkPrompt?
+
+    /// Fills in the server address and token from a setup code and connects, the same way as
+    /// leaving the server fields (the token goes to Keychain). Never logs the code or token.
+    func applySetupCode(_ code: LunaSetupCode) async {
+        settings.bridgeURL = code.server.absoluteString
+        settings.accessToken = code.token
+        await commitServerFields()
+    }
+
+    /// The user tapped Connect (true) or Cancel on a setup link's confirmation.
+    func answerSetupLink(connect: Bool) async {
+        guard case .confirm(let code) = setupLinkPrompt else { setupLinkPrompt = nil; return }
+        setupLinkPrompt = nil
+        VoiceDiagnosticLog.record("setup.link", "result=\(connect ? "connect" : "cancel")")
+        if connect { await applySetupCode(code) }
+    }
+
     func handleOpenURL(_ url: URL) async {
+        // `<scheme>://setup?code=…` from the QR code that `hermes lens setup` prints. A link can
+        // come from anywhere, so it is never applied silently: the user confirms the host first.
+        // Other links (the glasses' Meta AI callbacks) go to the glasses service as before.
+        if LunaSetupCode.isSetupLink(url) {
+            let code = LunaSetupCode.parse(link: url)
+            VoiceDiagnosticLog.record("setup.code", "result=\(code == nil ? "invalid" : "ok") source=link")
+            setupLinkPrompt = code.map { .confirm($0) } ?? .invalid
+            return
+        }
         do {
             _ = try await glassesService.handleOpenURL(url)
             glassesRegistrationState = glassesService.registrationState

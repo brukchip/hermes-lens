@@ -1,4 +1,6 @@
+import HermesLensCore
 import SwiftUI
+import UIKit
 
 /// Server address and access token for the Hermes Lens plugin. Used by
 /// onboarding and Settings. The token is saved to iPhone Keychain only.
@@ -21,6 +23,14 @@ struct ServerConnectionFields: View {
             .autocorrectionDisabled()
             .accessibilityIdentifier("settings.server.token")
             .onSubmit { Task { await model.commitServerFields() } }
+        Button {
+            Task { await pasteSetupCode() }
+        } label: {
+            Label("Paste setup code", systemImage: "doc.on.clipboard")
+        }
+        .disabled(isConnecting)
+        .accessibilityHint("Uses the code that hermes lens setup printed on your server.")
+        .accessibilityIdentifier("settings.server.pasteCode")
         Button {
             Task { await connect() }
         } label: {
@@ -53,6 +63,24 @@ struct ServerConnectionFields: View {
         }
         model.rebuildServices()
         await model.refreshReadiness()
+        showConnectionStatus()
+    }
+
+    /// Reads the clipboard only on this tap. The code is never logged or shown.
+    private func pasteSetupCode() async {
+        guard let code = UIPasteboard.general.string.flatMap(LunaSetupCode.parse) else {
+            VoiceDiagnosticLog.record("setup.code", "result=invalid source=paste")
+            status = LunaSetupCode.invalidMessage
+            return
+        }
+        VoiceDiagnosticLog.record("setup.code", "result=ok source=paste")
+        isConnecting = true
+        defer { isConnecting = false }
+        await model.applySetupCode(code)
+        showConnectionStatus()
+    }
+
+    private func showConnectionStatus() {
         switch model.connectionState {
         case .connected:
             status = model.lensConfiguration.supportsNativeVoice
@@ -63,5 +91,38 @@ struct ServerConnectionFields: View {
         case .checking, .unchecked:
             status = nil
         }
+    }
+}
+
+extension View {
+    /// Asks before a `<scheme>://setup?code=…` link changes Luna's server: it names the host,
+    /// and only Connect saves the address and token. Applied to the app shell and to onboarding
+    /// (which covers the shell on first run).
+    func setupLinkConfirmation(_ model: AppModel) -> some View {
+        let host: String? = if case .confirm(let code) = model.setupLinkPrompt { code.server.host() } else { nil }
+        return self
+            .alert(
+                "Connect Luna to \(host ?? "this server")?",
+                isPresented: Binding(
+                    get: { if case .confirm = model.setupLinkPrompt { true } else { false } },
+                    set: { if !$0, case .confirm = model.setupLinkPrompt { model.setupLinkPrompt = nil } }
+                )
+            ) {
+                Button("Connect") { Task { await model.answerSetupLink(connect: true) } }
+                Button("Cancel", role: .cancel) { Task { await model.answerSetupLink(connect: false) } }
+            } message: {
+                Text("This setup link replaces Luna's server address and access token. Connect only if you just ran hermes lens setup on your own server.")
+            }
+            .alert(
+                "Setup link not valid",
+                isPresented: Binding(
+                    get: { model.setupLinkPrompt == .invalid },
+                    set: { if !$0, model.setupLinkPrompt == .invalid { model.setupLinkPrompt = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { model.setupLinkPrompt = nil }
+            } message: {
+                Text(LunaSetupCode.invalidMessage)
+            }
     }
 }

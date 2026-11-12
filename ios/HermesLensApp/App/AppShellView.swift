@@ -141,6 +141,7 @@ struct AppShellView: View {
         .fullScreenCover(isPresented: Binding(get: { showsOnboarding }, set: { _ in })) {
             LunaOnboardingView(tryWithoutGlasses: tryWithoutGlasses)
                 .onAppear { onboardingInProgress = true }
+                .setupLinkConfirmation(model)
         }
         .fullScreenCover(item: $capture, onDismiss: {
             audioCoordinator.release(.visualCapture)
@@ -158,6 +159,7 @@ struct AppShellView: View {
         } message: {
             Text(bindableModel.errorMessage ?? "Unknown error")
         }
+        .setupLinkConfirmation(model)
         .onChange(of: intentRouter.handledIntent?.id) {
             handleIntent()
         }

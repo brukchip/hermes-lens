@@ -305,3 +305,21 @@ import UIKit
     controller.end()
     #expect(!saved && !controller.isActive)
 }
+
+@Test @MainActor func aSetupLinkAsksBeforeChangingTheServer() async throws {
+    let suiteName = "HermesLensTests.\(UUID().uuidString)"
+    let suite = UserDefaults(suiteName: suiteName)!
+    defer { suite.removePersistentDomain(forName: suiteName) }
+    let model = AppModel(settings: AppSettings(defaults: suite))
+    let json = Data(#"{"s":"https://lens.example.test","t":"fixture-token-0123456789abcdef"}"#.utf8)
+    let code = "HL1-" + json.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    await model.handleOpenURL(try #require(URL(string: "hermeslens://setup?code=\(code)")))
+    guard case .confirm(let pending) = model.setupLinkPrompt else { Issue.record("Expected a confirmation"); return }
+    #expect(pending.server.host() == "lens.example.test")
+    #expect(model.settings.bridgeURL != "https://lens.example.test") // nothing saved before Connect
+    await model.answerSetupLink(connect: false)
+    #expect(model.setupLinkPrompt == nil)
+    await model.handleOpenURL(try #require(URL(string: "hermeslens://setup?code=HL1-junk")))
+    #expect(model.setupLinkPrompt == .invalid)
+}

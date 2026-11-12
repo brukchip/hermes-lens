@@ -61,7 +61,7 @@ struct LunaOnboardingView: View {
                     .padding(.top, 40)
                 VStack(spacing: 10) {
                     Text("Pair with Hermes").font(.lunaDisplay).multilineTextAlignment(.center)
-                    Text("Enter the address of your Hermes server and the access token from the Hermes Lens plugin.")
+                    Text("Run hermes lens setup on your server, then scan its QR code with the iPhone camera or paste its setup code here. You can also enter the address and access token yourself.")
                         .font(.body).foregroundStyle(LunaColor.secondaryText).multilineTextAlignment(.center)
                 }
                 VStack(alignment: .leading, spacing: 12) {
