@@ -5,6 +5,8 @@ import SwiftUI
 /// and each permission explained before iOS asks for it.
 struct LunaOnboardingView: View {
     @Environment(AppModel.self) private var model
+    /// Opens the scripted demo call on Home (no glasses, server, microphone or camera).
+    var tryWithoutGlasses: () -> Void = {}
     @State private var page = 0
     @State private var microphone = AVAudioApplication.shared.recordPermission
 
@@ -19,6 +21,10 @@ struct LunaOnboardingView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .onChange(of: page) { old, _ in
+                // Leaving the server page by Continue, Set up later or a swipe keeps the token.
+                if old == 1 { Task { await model.commitServerFields() } }
+            }
         }
         .overlay(alignment: .topTrailing) {
             Button("Skip") { finish() }
@@ -34,8 +40,16 @@ struct LunaOnboardingView: View {
              message: "Hi, I'm Luna. Talk to me through your Ray-Ban Meta glasses. I can look at what you see, record a short clip, save a contact from a business card, and pass your requests to your own Hermes agent. Actions it gates wait for your tap.") {
             LunaCharacter(mood: .ready, size: 220)
         } action: {
-            LunaPrimaryButton(title: "Continue", systemImage: "arrow.right", identifier: "onboarding.next") {
-                withAnimation { page = 1 }
+            VStack(spacing: 12) {
+                LunaPrimaryButton(title: "Continue", systemImage: "arrow.right", identifier: "onboarding.next") {
+                    withAnimation { page = 1 }
+                }
+                Button("Try without glasses", action: tryWithoutGlasses)
+                    .font(.lunaLabel)
+                    .foregroundStyle(LunaColor.text)
+                    .frame(minHeight: 44)
+                    .accessibilityHint("Opens a short demo call. Nothing is sent anywhere.")
+                    .accessibilityIdentifier("onboarding.tryDemo")
             }
         }
     }
@@ -47,7 +61,7 @@ struct LunaOnboardingView: View {
                     .padding(.top, 40)
                 VStack(spacing: 10) {
                     Text("Pair with Hermes").font(.lunaDisplay).multilineTextAlignment(.center)
-                    Text("Enter the address of your Hermes server and the access token from the Hermes Lens plugin.")
+                    Text("Run hermes lens setup on your server, then scan its QR code with the iPhone camera or paste its setup code here. You can also enter the address and access token yourself.")
                         .font(.body).foregroundStyle(LunaColor.secondaryText).multilineTextAlignment(.center)
                 }
                 VStack(alignment: .leading, spacing: 12) {
@@ -159,6 +173,7 @@ struct LunaOnboardingView: View {
     }
 
     private func finish() {
+        if page == 1 { Task { await model.commitServerFields() } }
         model.settings.hasCompletedOnboarding = true
     }
 }

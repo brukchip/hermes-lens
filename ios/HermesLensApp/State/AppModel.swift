@@ -27,6 +27,8 @@ final class AppModel {
     var reminders: [ReminderRecord] = []
     var artifacts: [CaptureArtifact] = []
     var connectionState: ConnectionState = .unchecked
+    /// Why the last health or settings check failed (wrong token, unreachable, …); nil when it worked.
+    private(set) var serverProblem: HermesServerProblem?
     var glassesState: GlassesConnectionState = .disconnected
     var glassesRegistrationState: GlassesRegistrationState = .unavailable
     /// Battery, worn, folded and heat as the glasses report them (nil: no glasses known).
@@ -41,8 +43,10 @@ final class AppModel {
     var errorMessage: String?
     var notificationAuthorization: UNAuthorizationStatus = .notDetermined
     var lensConfiguration = HermesLensConfiguration.fallback
-    /// False until a configuration came from the server (now or cached from an earlier run).
-    /// The fallback keeps live voice off, so it must not stand once the server is reachable.
+    /// False until the server's configuration was fetched in this run of the app. A cached
+    /// copy is used meanwhile, but it may come from an older server version (with a feature
+    /// off). Until a fetch succeeds, becoming active and starting a call fetch again, each
+    /// time waiting at most `HermesLensConfiguration.fetchTimeout` before using the cache.
     private(set) var hasServerConfiguration = false
 
     private var hermesClient: any HermesClient
@@ -66,7 +70,6 @@ final class AppModel {
         LunaStorageRoot.resetForUITestRun()
         if let cachedConfiguration = Self.cachedLensConfiguration() {
             lensConfiguration = cachedConfiguration
-            hasServerConfiguration = true
         }
         let snapshot = await persistence.load()
         memories = snapshot.memories.sorted { $0.capturedAt > $1.capturedAt }
@@ -79,8 +82,30 @@ final class AppModel {
         await checkConnection()
     }
 
+    /// Keeps a server address and token the user typed but left without "Save and connect"
+    /// (onboarding's Continue, Skip or a swipe, or leaving Settings): the token goes to
+    /// Keychain and Luna reconnects with them. Nothing happens when nothing changed.
+    func commitServerFields() async {
+        settings.bridgeURL = settings.bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.accessToken = settings.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokenChanged = settings.hasUnsavedAccessToken
+        guard tokenChanged || servicesEndpoint != settings.bridgeURL else { return }
+        if tokenChanged {
+            do { try settings.saveAccessToken() } catch {
+                errorMessage = "The token could not be saved to Keychain."
+                return
+            }
+        }
+        rebuildServices()
+        await refreshReadiness()
+    }
+
+    /// The server address the current client was built for.
+    @ObservationIgnored private var servicesEndpoint: String?
+
     func rebuildServices() {
         endpointProblem = nil
+        servicesEndpoint = settings.bridgeURL
         if settings.usesMockHermes {
             hermesClient = MockHermesClient()
         } else {
@@ -127,11 +152,15 @@ final class AppModel {
         connectionState = .checking
         do {
             let health = try await hermesClient.health()
+            serverProblem = nil
             connectionState = health.isHealthy
                 ? .connected(health.detail)
                 : .offline(health.detail)
         } catch {
-            connectionState = .offline(error.localizedDescription)
+            // A wrong token, an unreachable server and a server that is not Hermes Lens each
+            // get their own message (the token problem used to read as "can't be reached").
+            serverProblem = HermesServerProblem(error)
+            connectionState = .offline(serverProblem?.message ?? error.localizedDescription)
         }
     }
 
@@ -147,6 +176,7 @@ final class AppModel {
         } catch {
             // Keep the last valid configuration (or the fail-safe defaults).
             // A configuration failure must never block voice communication.
+            serverProblem = HermesServerProblem(error) ?? serverProblem
         }
     }
 
@@ -175,17 +205,46 @@ final class AppModel {
     /// Luna in a call. Never raised as a global alert.
     private(set) var lastCaptureError: String?
 
-    func holdGlassesCameraForCall() async {
+    /// Starts the glasses camera stream for a call; true when it is running. A failed start
+    /// is logged (error type only) and tried once more after a second, with the half-started
+    /// camera detached first.
+    @discardableResult
+    func holdGlassesCameraForCall() async -> Bool {
         glassesIdleRelease?.cancel()
         glassesInCall = true
-        guard !isGlassesCameraHeld, glassesService.state != .observing else { return }
-        do {
-            try await glassesService.startObserving()
-            isGlassesCameraHeld = true
-        } catch {
-            // The capture itself reports the failure; holding is only an optimization.
+        if isGlassesCameraHeld || glassesService.state == .observing { return true }
+        defer { glassesState = glassesService.state }
+        for attempt in 1...2 {
+            do {
+                try await glassesService.startObserving()
+                isGlassesCameraHeld = true
+                if attempt > 1 { VoiceDiagnosticLog.record("glasses.hold", "result=ok attempt=\(attempt)") }
+                return true
+            } catch {
+                VoiceDiagnosticLog.record("glasses.hold", "result=failed attempt=\(attempt) error=\(Self.errorLabel(error))")
+                await glassesService.stopObserving()
+                guard attempt == 1, !Task.isCancelled else { break }
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
-        glassesState = glassesService.state
+        return false
+    }
+
+    /// An error's type and case (or domain and code) for the diagnostics log; never its text.
+    static func errorLabel(_ error: Error) -> String {
+        if let error = error as? GlassesServiceError {
+            return "GlassesServiceError.\(String(describing: error).split(separator: "(").first ?? "unknown")"
+        }
+        if error is CancellationError { return "cancelled" }
+        let ns = error as NSError
+        return "\(ns.domain)#\(ns.code)"
+    }
+
+    /// After a look or a recording in a call the camera stops at once, unless the user keeps
+    /// it ready for the rest of the call (Settings). Runs on every path, including failures.
+    private func releaseCallCameraAfterCapture() async {
+        guard !settings.keepsCameraReadyInCalls else { return }
+        await releaseGlassesCameraForCall()
     }
 
     /// The view for a call's `look`. The held camera stream's newest frame (720 × 1280,
@@ -196,17 +255,31 @@ final class AppModel {
     /// Only a frame from the last second counts. On 2026-11-01 the stream stalled and
     /// every `look` returned the same old frame, so Luna kept describing one picture;
     /// a stalled stream is restarted once. A cold stream can take longer than 3 s to
-    /// start, so it gets up to 10 s before falling back to a full photo.
+    /// start, so it gets up to 10 s before falling back to a full photo; a stream that
+    /// never started gets no wait at all.
     func captureCallFrame() async throws -> Data {
-        await holdGlassesCameraForCall()
+        let held = await holdGlassesCameraForCall()
+        do {
+            let image = try await lookThroughCallCamera(held: held)
+            await releaseCallCameraAfterCapture()
+            return image
+        } catch {
+            // A cancelled or failed look still lets the camera go.
+            await releaseCallCameraAfterCapture()
+            throw error
+        }
+    }
+
+    private func lookThroughCallCamera(held: Bool) async throws -> Data {
+        var held = held
         var restarted = false
-        var frame = try await freshCallFrame()
-        if frame == nil, glassesService.latestPreviewAt != nil {
+        var frame = held ? try await freshCallFrame() : nil
+        if held, frame == nil, glassesService.latestPreviewAt != nil {
             await glassesService.stopObserving()
             isGlassesCameraHeld = false
-            await holdGlassesCameraForCall()
+            held = await holdGlassesCameraForCall()
             restarted = true
-            frame = try await freshCallFrame()
+            frame = held ? try await freshCallFrame() : nil
         }
         if let frame {
             let started = Date.now
@@ -216,13 +289,25 @@ final class AppModel {
                 "fresh=true restarted=\(restarted) source=\(still == nil ? "frame" : "still") "
                 + "still_ms=\(Int(Date.now.timeIntervalSince(started) * 1000)) \(Self.imageShape(image))")
             _ = try? await beginArtifact(data: image, kind: .photo, request: "Photo from a Luna call")
-            if !settings.keepsCameraReadyInCalls { await releaseGlassesCameraForCall() }
             return image
         }
-        VoiceDiagnosticLog.record("glasses.call_frame", "fresh=false restarted=\(restarted)")
+        VoiceDiagnosticLog.record("glasses.call_frame", "fresh=false restarted=\(restarted) held=\(held)")
+        try Task.checkCancellation()
         guard let artifact = await captureArtifact(kind: .photo, request: "Photo from a Luna call"),
-              let jpeg = await captureData(for: artifact) else { throw GlassesServiceError.photoCaptureFailed }
+              let jpeg = await captureData(for: artifact) else {
+            VoiceDiagnosticLog.record("glasses.photo", "result=failed held=\(held)")
+            throw GlassesServiceError.photoCaptureFailed
+        }
         return jpeg
+    }
+
+    /// A call's `record_video`: a short clip saved to the Library. The camera is released
+    /// afterwards like after a look, not held until the call ends.
+    func recordCallVideo() async -> CaptureArtifact? {
+        await holdGlassesCameraForCall()
+        let artifact = await captureArtifact(kind: .video, request: "Video from a Luna call")
+        await releaseCallCameraAfterCapture()
+        return artifact
     }
 
     /// The longest a look waits for a still photo before using the stream frame.
@@ -551,15 +636,7 @@ final class AppModel {
     /// Glasses connection outcomes in the diagnostics log, only when they change (auto-connect
     /// retries every 12 s). Error case names and codes only, never device names.
     private func traceGlassesConnect(_ error: Error?) {
-        let outcome: String
-        if let error = error as? GlassesServiceError {
-            outcome = "error=\(String(describing: error).split(separator: "(").first ?? "unknown")"
-        } else if let error {
-            let ns = error as NSError
-            outcome = "error=\(ns.domain)#\(ns.code)"
-        } else {
-            outcome = "ok"
-        }
+        let outcome = error.map { "error=\(Self.errorLabel($0).replacingOccurrences(of: "GlassesServiceError.", with: ""))" } ?? "ok"
         let line = "\(outcome) registration=\(glassesService.registrationState) state=\(glassesService.state)"
         guard line != lastGlassesTrace else { return }
         lastGlassesTrace = line
@@ -645,7 +722,39 @@ final class AppModel {
         (try? await glassesService.requestCameraPermission()) ?? false
     }
 
+    /// A setup link waiting for the user's Connect or Cancel, or a setup link that was invalid.
+    enum SetupLinkPrompt: Equatable {
+        case confirm(LunaSetupCode)
+        case invalid
+    }
+    var setupLinkPrompt: SetupLinkPrompt?
+
+    /// Fills in the server address and token from a setup code and connects, the same way as
+    /// leaving the server fields (the token goes to Keychain). Never logs the code or token.
+    func applySetupCode(_ code: LunaSetupCode) async {
+        settings.bridgeURL = code.server.absoluteString
+        settings.accessToken = code.token
+        await commitServerFields()
+    }
+
+    /// The user tapped Connect (true) or Cancel on a setup link's confirmation.
+    func answerSetupLink(connect: Bool) async {
+        guard case .confirm(let code) = setupLinkPrompt else { setupLinkPrompt = nil; return }
+        setupLinkPrompt = nil
+        VoiceDiagnosticLog.record("setup.link", "result=\(connect ? "connect" : "cancel")")
+        if connect { await applySetupCode(code) }
+    }
+
     func handleOpenURL(_ url: URL) async {
+        // `<scheme>://setup?code=…` from the QR code that `hermes lens setup` prints. A link can
+        // come from anywhere, so it is never applied silently: the user confirms the host first.
+        // Other links (the glasses' Meta AI callbacks) go to the glasses service as before.
+        if LunaSetupCode.isSetupLink(url) {
+            let code = LunaSetupCode.parse(link: url)
+            VoiceDiagnosticLog.record("setup.code", "result=\(code == nil ? "invalid" : "ok") source=link")
+            setupLinkPrompt = code.map { .confirm($0) } ?? .invalid
+            return
+        }
         do {
             _ = try await glassesService.handleOpenURL(url)
             glassesRegistrationState = glassesService.registrationState

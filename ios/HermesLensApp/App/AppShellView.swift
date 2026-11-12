@@ -57,6 +57,9 @@ struct AppShellView: View {
     @State private var audioCoordinator: AudioSessionCoordinator
     /// Glasses buttons are listening for the running call.
     @State private var gesturesOn = false
+    /// "Try without glasses" from onboarding: the demo call runs on Home, and onboarding
+    /// comes back when it ends.
+    @State private var tryingDemo = false
 
     init(intentRouter: AppIntentRouter) {
         self.intentRouter = intentRouter
@@ -136,8 +139,9 @@ struct AppShellView: View {
             }
         }
         .fullScreenCover(isPresented: Binding(get: { showsOnboarding }, set: { _ in })) {
-            LunaOnboardingView()
+            LunaOnboardingView(tryWithoutGlasses: tryWithoutGlasses)
                 .onAppear { onboardingInProgress = true }
+                .setupLinkConfirmation(model)
         }
         .fullScreenCover(item: $capture, onDismiss: {
             audioCoordinator.release(.visualCapture)
@@ -155,6 +159,7 @@ struct AppShellView: View {
         } message: {
             Text(bindableModel.errorMessage ?? "Unknown error")
         }
+        .setupLinkConfirmation(model)
         .onChange(of: intentRouter.handledIntent?.id) {
             handleIntent()
         }
@@ -178,7 +183,7 @@ struct AppShellView: View {
         .onChange(of: calls.call?.state.phase) { _, phase in
             // Once the call is connected and the glasses audio has settled (Meta: let
             // HFP settle before other glasses work), the glasses buttons control it.
-            guard phase == .listening, !gesturesOn else { return }
+            guard phase == .listening, !gesturesOn, !tryingDemo else { return }
             gesturesOn = true
             Task { [model, calls] in
                 try? await Task.sleep(for: .seconds(2))
@@ -203,6 +208,7 @@ struct AppShellView: View {
             }
         }
         .onChange(of: calls.isActive) { _, active in
+            if !active, tryingDemo { tryingDemo = false }
             guard !active, gesturesOn else { return }
             gesturesOn = false
             Task { await model.finishGlassesForCall() }
@@ -238,6 +244,7 @@ struct AppShellView: View {
     /// First run only: until finished or skipped, and never once glasses are
     /// registered (existing installs skip it). `-LunaShowOnboarding` forces it for tests.
     private var showsOnboarding: Bool {
+        if tryingDemo { return false }
         if ProcessInfo.processInfo.arguments.contains("-LunaShowOnboarding") {
             return !model.settings.hasCompletedOnboarding
         }
@@ -263,11 +270,25 @@ struct AppShellView: View {
 
     static let lookRequest = "The user tapped Look. Look through my glasses now and tell me briefly what you see."
 
+    /// Onboarding's "Try without glasses": the scripted demo call, which never contacts a
+    /// server and uses no microphone or camera. It is not saved as a call record.
+    private func tryWithoutGlasses() {
+        selectedTab = .home
+        lunaPath.removeAll()
+        tryingDemo = true
+        VoiceDiagnosticLog.record("talk.route", "path=onboarding_demo")
+        calls.start({ LunaDemoCall() }, keepsRecord: false)
+    }
+
     /// Fetches the server configuration first when it never arrived (it decides whether
     /// live voice is on), then starts or joins the call on Home.
     private func startCall(ask text: String?) {
         selectedTab = .home
         lunaPath.removeAll()
+        if calls.isDemo {
+            // Look or Talk during the demo goes to the demo: never a server fetch.
+            calls.start({ LunaDemoCall() }, ask: text, keepsRecord: false); return
+        }
         guard !model.hasServerConfiguration, !model.settings.usesMockHermes,
               model.settings.hasServerConfiguration else {
             calls.start(makeCall, ask: text); return
@@ -298,9 +319,10 @@ struct AppShellView: View {
             path = "unavailable"
             call = LunaUnavailableCall(reason: !model.settings.hasServerConfiguration
                 ? "Add your Hermes server address and access token in Settings."
-                : voice.nativeAudioEnabled
-                    ? "Luna can't reach her server. Check the server address and access token in Settings."
-                    : "Luna's live voice is not available from your Hermes server right now.")
+                : model.serverProblem?.message
+                    ?? (voice.nativeAudioEnabled
+                        ? "Luna can't reach her server. Check the server address and access token in Settings."
+                        : "Luna's live voice is not available from your Hermes server right now."))
         }
         // Which path a call took, and the inputs that decided it. No identifiers.
         VoiceDiagnosticLog.record("talk.route", "path=\(path) native_enabled=\(voice.nativeAudioEnabled) "
@@ -321,8 +343,7 @@ struct AppShellView: View {
             recordVideo: { [model] in
                 guard model.settings.allowsCameraInCalls else { throw LunaCameraError(code: "camera_off_in_settings") }
                 if let blocker = model.glassesCameraBlocker { throw LunaCameraError(code: blocker) }
-                await model.holdGlassesCameraForCall()
-                guard await model.captureArtifact(kind: .video, request: "Video from a Luna call") != nil else {
+                guard await model.recordCallVideo() != nil else {
                     throw LunaCameraError(code: "video_glasses_\(model.glassesState)")
                 }
             },

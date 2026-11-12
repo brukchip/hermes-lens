@@ -44,17 +44,9 @@ struct LunaCallAction: Codable, Hashable, Sendable {
 }
 
 extension Array where Element == LunaCallTurn {
-    /// Appends what was heard and said in a finished (or interrupted) turn,
-    /// skipping repeats so a turn is never recorded twice.
-    mutating func record(heard: String, said: String) {
-        let heard = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        let said = said.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !heard.isEmpty, !contains(where: { $0.speaker == .you && $0.text == heard }) {
-            append(LunaCallTurn(speaker: .you, text: heard))
-        }
-        if !said.isEmpty, last != LunaCallTurn(speaker: .luna, text: said) {
-            append(LunaCallTurn(speaker: .luna, text: said))
-        }
+    /// A call's conversation in spoken order (see `LunaTranscriptLog`).
+    init(_ log: LunaTranscriptLog) {
+        self = log.entries.map { LunaCallTurn(speaker: $0.speaker == .you ? .you : .luna, text: $0.text) }
     }
 }
 
@@ -103,17 +95,23 @@ final class LunaCallController {
     /// Turns and actions from a dropped call that was retried, so the record keeps them.
     @ObservationIgnored private var carriedTurns: [LunaCallTurn] = []
     @ObservationIgnored private var carriedActions: [LunaCallAction] = []
+    /// False for the onboarding demo: it is not saved as a call record.
+    @ObservationIgnored private var keepsRecord = true
     /// Receives the finished call (start, end, turns, actions) to save as a record.
     @ObservationIgnored var onFinished: ((Date, Date, [LunaCallTurn], [LunaCallAction]) -> Void)?
 
     var isActive: Bool { call != nil }
 
+    /// The running call is the scripted demo (no server, microphone or camera).
+    var isDemo: Bool { call is LunaDemoCall }
+
     /// Starts a call, or reuses the running one. `ask` is sent once it connects.
-    func start(_ make: @escaping () -> any LunaCall, ask text: String? = nil) {
+    func start(_ make: @escaping () -> any LunaCall, ask text: String? = nil, keepsRecord: Bool = true) {
         if let call, ![.failed, .ended].contains(call.state.phase) {
             if let text { call.ask(text) }
             return
         }
+        self.keepsRecord = keepsRecord
         makeCall = make
         retriesLeft = 1
         startedAt = .now
@@ -126,7 +124,7 @@ final class LunaCallController {
             let turns = carriedTurns + call.turns
             let actions = carriedActions + call.actions
             call.end()
-            if let startedAt { onFinished?(startedAt, .now, turns, actions) }
+            if keepsRecord, let startedAt { onFinished?(startedAt, .now, turns, actions) }
         }
         call = nil
         makeCall = nil
@@ -174,7 +172,7 @@ final class LunaDemoCall: LunaCall {
     private(set) var approvalShownAt: Date?
     let contactDraft: LunaContactDraft? = nil
     let retryable = true
-    private(set) var turns: [LunaCallTurn] = []
+    var turns: [LunaCallTurn] { [LunaCallTurn](state.log) }
     private(set) var actions: [LunaCallAction] = []
     @ObservationIgnored private var pendingAsk: String?
 
@@ -238,7 +236,6 @@ final class LunaDemoCall: LunaCall {
     private func speak(_ text: String, generation: UUID) {
         guard generation == state.generation else { return }
         state.receive(.outputTranscript(text), generation: generation)
-        turns.record(heard: state.heard, said: state.transcript)
         state.receive(.turnComplete, generation: generation)
     }
 

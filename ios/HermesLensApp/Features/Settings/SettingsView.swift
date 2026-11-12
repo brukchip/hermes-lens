@@ -159,6 +159,8 @@ struct SettingsView: View {
         }
         .task(id: model.glassesRegistrationState) { cameraAllowed = await model.glassesCameraPermission() }
         .navigationTitle("You")
+        // Leaving Settings without "Save and connect" keeps a typed address and token.
+        .onDisappear { Task { await model.commitServerFields() } }
         .navigationBarTitleDisplayMode(.large)
         .lunaFormChrome()
         .confirmationDialog("Disconnect Luna from glasses?", isPresented: $confirmsDisconnect,
@@ -256,7 +258,12 @@ struct SettingsView: View {
     private var lunaStatus: String {
         switch model.connectionState {
         case .connected: "Online"
-        case .offline: "Offline — check your connection"
+        case .offline:
+            switch model.serverProblem {
+            case .wrongToken: "Access token not accepted"
+            case .notLensServer: "Not a Hermes Lens server — check the address"
+            default: "Offline — check your connection"
+            }
         case .checking: "Checking…"
         case .unchecked: "Not checked yet"
         }

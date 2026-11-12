@@ -102,6 +102,44 @@ private final class NativeRequests: @unchecked Sendable {
         #expect(requests.values.count == 1)
     }
 
+    @Test func aRefusedGeminiKeyIsReportedOnceAndNotRetried() async throws {
+        let client = try broker()
+        let requests = NativeRequests()
+        NativeStub.handler = { request in
+            _ = requests.append(request)
+            return (503, Data(#"{"error":{"code":"native_provider_unavailable"}}"#.utf8))
+        }
+        defer { NativeStub.handler = nil }
+        await #expect(throws: LunaNativeError.providerKeyRefused) { _ = try await client.create(requestID: UUID()) }
+        #expect(requests.values.count == 1)
+        NativeStub.handler = { _ in (401, Data(#"{"error":{"code":"unauthorized"}}"#.utf8)) }
+        await #expect(throws: LunaNativeError.wrongToken) { _ = try await client.create(requestID: UUID()) }
+    }
+
+    @Test func refusedToolPhotoAndApprovalRequestsCarryTheServersCode() async throws {
+        let client = try broker()
+        NativeStub.handler = { request in
+            switch request.url?.path {
+            case "/v1/lens/native/photos": (413, Data(#"{"error":{"code":"native_photo_size"}}"#.utf8))
+            case "/v1/lens/native/approvals": (404, Data(#"{"error":{"code":"native_approval_not_found"}}"#.utf8))
+            default: (404, Data(#"{"error":{"code":"native_photo_not_found"}}"#.utf8))
+            }
+        }
+        defer { NativeStub.handler = nil }
+        await #expect(throws: LunaServerError(status: 413, code: "native_photo_size")) {
+            _ = try await client.uploadPhoto(callID: UUID(), jpeg: Data([0xFF, 0xD8, 0xFF]))
+        }
+        await #expect(throws: LunaServerError(status: 404, code: "native_photo_not_found")) {
+            _ = try await client.runTool(callID: UUID(), call: LunaNativeToolCall(id: "1", name: "ask_luna", request: "x"))
+        }
+        do {
+            _ = try await client.decide(callID: UUID(), approvalID: UUID(), approve: true)
+            Issue.record("Expected the expired card to be refused")
+        } catch let error as LunaServerError {
+            #expect(error.isExpiredApproval)
+        }
+    }
+
     private static func body(_ request: URLRequest) -> [String: Any] {
         var data = request.httpBody ?? Data()
         if data.isEmpty, let stream = request.httpBodyStream {

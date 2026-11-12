@@ -198,12 +198,11 @@ import UIKit
     #expect(await store.load().isEmpty)
 }
 
-@Test func turnRecorderNeverRecordsATurnTwice() {
-    var turns: [LunaCallTurn] = []
-    turns.record(heard: "How did the launch go?", said: "")
-    turns.record(heard: "How did the launch go?", said: "Sales were up.")
-    turns.record(heard: "How did the launch go?", said: "Sales were up.")
-    #expect(turns == [.init(speaker: .you, text: "How did the launch go?"), .init(speaker: .luna, text: "Sales were up.")])
+@Test func callTurnsFollowTheSpokenOrderAndKeepRepeats() {
+    var log = LunaTranscriptLog()
+    for answer in ["Shall I send it?", "Sent."] { log.user("Yes"); log.luna(answer); log.turnEnded() }
+    #expect([LunaCallTurn](log) == [.init(speaker: .you, text: "Yes"), .init(speaker: .luna, text: "Shall I send it?"),
+                                    .init(speaker: .you, text: "Yes"), .init(speaker: .luna, text: "Sent.")])
 }
 
 @Test @MainActor func endingADemoCallHandsOverItsTurnsAndActions() async throws {
@@ -284,4 +283,43 @@ import UIKit
     settings.usesGlassesGestures = false
     #expect(!AppSettings(defaults: suite).usesGlassesGestures)
     suite.removePersistentDomain(forName: suiteName)
+}
+
+@Test @MainActor func diagnosticsLogKeepsTheNewestFourThousandLines() {
+    let lines = (0..<(VoiceDiagnosticLog.maximumLines + VoiceDiagnosticLog.trimSlack + 1)).map { "line \($0)" }
+    let kept = VoiceDiagnosticLog.trimmed(lines)
+    #expect(kept.count == 4000)
+    #expect(kept.last == lines.last && kept.first == "line \(lines.count - 4000)")
+}
+
+@Test @MainActor func theOnboardingDemoRunsWithoutAServerAndIsNotSaved() async throws {
+    let controller = LunaCallController()
+    var saved = false
+    controller.onFinished = { _, _, _, _ in saved = true }
+    controller.start({ LunaDemoCall() }, keepsRecord: false)
+    #expect(controller.isDemo)
+    try await Task.sleep(for: .milliseconds(800))
+    controller.call?.ask("Look at this")
+    try await Task.sleep(for: .seconds(1.5))
+    #expect(controller.call?.turns.isEmpty == false)
+    controller.end()
+    #expect(!saved && !controller.isActive)
+}
+
+@Test @MainActor func aSetupLinkAsksBeforeChangingTheServer() async throws {
+    let suiteName = "HermesLensTests.\(UUID().uuidString)"
+    let suite = UserDefaults(suiteName: suiteName)!
+    defer { suite.removePersistentDomain(forName: suiteName) }
+    let model = AppModel(settings: AppSettings(defaults: suite))
+    let json = Data(#"{"s":"https://lens.example.test","t":"fixture-token-0123456789abcdef"}"#.utf8)
+    let code = "HL1-" + json.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    await model.handleOpenURL(try #require(URL(string: "hermeslens://setup?code=\(code)")))
+    guard case .confirm(let pending) = model.setupLinkPrompt else { Issue.record("Expected a confirmation"); return }
+    #expect(pending.server.host() == "lens.example.test")
+    #expect(model.settings.bridgeURL != "https://lens.example.test") // nothing saved before Connect
+    await model.answerSetupLink(connect: false)
+    #expect(model.setupLinkPrompt == nil)
+    await model.handleOpenURL(try #require(URL(string: "hermeslens://setup?code=HL1-junk")))
+    #expect(model.setupLinkPrompt == .invalid)
 }

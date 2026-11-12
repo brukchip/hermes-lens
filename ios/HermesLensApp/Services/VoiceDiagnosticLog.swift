@@ -14,7 +14,11 @@ import OSLog
 /// structural strings only.
 @MainActor
 enum VoiceDiagnosticLog {
-    private static let maximumLines = 400
+    /// About a day of calls: 400 lines covered only a few hours.
+    static let maximumLines = 4000
+    /// Lines appended past the limit before the file is rewritten trimmed: appending one line
+    /// is cheap, rewriting the whole file on every event (on the main actor, mid-call) is not.
+    static let trimSlack = 500
     private static let fileName = "voice-diagnostics.log"
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "HermesLens",
@@ -39,10 +43,17 @@ enum VoiceDiagnosticLog {
         let stamp = ISO8601DateFormatter().string(from: Date())
         let line = detail.isEmpty ? "\(stamp) \(event)" : "\(stamp) \(event) \(detail)"
         lines.append(line)
-        if lines.count > maximumLines {
-            lines.removeFirst(lines.count - maximumLines)
+        if lines.count > maximumLines + trimSlack {
+            lines = trimmed(lines)
+            rewrite()
+        } else {
+            append(line)
         }
-        persist()
+    }
+
+    /// The newest `maximumLines` lines.
+    static func trimmed(_ lines: [String]) -> [String] {
+        Array(lines.suffix(maximumLines))
     }
 
     private static func loadIfNeeded() {
@@ -52,16 +63,39 @@ enum VoiceDiagnosticLog {
             return
         }
         lines = existing.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        excludeFromBackup()
         if lines.count > maximumLines {
-            lines.removeFirst(lines.count - maximumLines)
+            lines = trimmed(lines)
+            rewrite()
         }
     }
 
-    private static func persist() {
+    private static func excludeFromBackup() {
+        guard var fileURL else { return }
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? fileURL.setResourceValues(values)
+    }
+
+    private static func append(_ line: String) {
+        guard let fileURL else { return }
+        guard let handle = try? FileHandle(forWritingTo: fileURL) else { rewrite(); return }
+        defer { try? handle.close() }
+        do {
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((line + "\n").utf8))
+        } catch {
+            logger.error("Could not append voice diagnostics: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Writes the kept lines as the whole file, excluded from iCloud and device backups.
+    private static func rewrite() {
         guard let fileURL else { return }
         do {
             try lines.joined(separator: "\n").appending("\n")
                 .write(to: fileURL, atomically: true, encoding: .utf8)
+            excludeFromBackup()
         } catch {
             logger.error("Could not persist voice diagnostics: \(error.localizedDescription, privacy: .public)")
         }

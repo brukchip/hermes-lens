@@ -14,9 +14,6 @@ struct LunaCallPanel: View {
     @State private var showsFullCaptions = false
     @State private var editingContact = false
 
-    /// The server denies an unanswered approval after 120 s.
-    private static let approvalSeconds: TimeInterval = 120
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !call.tools.isEmpty {
@@ -46,12 +43,13 @@ struct LunaCallPanel: View {
 
     private var captions: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !call.state.heard.isEmpty {
-                captionLine(speaker: "You", text: call.state.heard, font: .body, color: LunaColor.secondaryText)
-            }
-            if !call.state.transcript.isEmpty {
-                captionLine(speaker: "Luna", text: call.state.transcript,
-                            font: .system(.title3, weight: .semibold), color: LunaColor.text)
+            // A new question goes below Luna's previous answer until she replies to it.
+            if call.state.heardIsLatest {
+                lunaCaption
+                youCaption
+            } else {
+                youCaption
+                lunaCaption
             }
             if call.state.interrupted {
                 Label("Interrupted", systemImage: "pause.circle")
@@ -66,6 +64,19 @@ struct LunaCallPanel: View {
         .onTapGesture { withAnimation(.snappy) { showsFullCaptions.toggle() } }
         .accessibilityIdentifier("call.captions")
         .accessibilityHint(showsFullCaptions ? "Shows less" : "Shows the full text")
+    }
+
+    @ViewBuilder private var youCaption: some View {
+        if !call.state.heard.isEmpty {
+            captionLine(speaker: "You", text: call.state.heard, font: .body, color: LunaColor.secondaryText)
+        }
+    }
+
+    @ViewBuilder private var lunaCaption: some View {
+        if !call.state.transcript.isEmpty {
+            captionLine(speaker: "Luna", text: call.state.transcript,
+                        font: .system(.title3, weight: .semibold), color: LunaColor.text)
+        }
     }
 
     private func captionLine(speaker: String, text: String, font: Font, color: Color) -> some View {
@@ -115,49 +126,58 @@ struct LunaCallPanel: View {
 
     // MARK: Approval
 
+    /// The server denies an unanswered approval after two minutes; the card counts down and
+    /// can no longer be tapped once it has expired.
     private func approvalCard(_ approval: LunaNativeToolResult.Approval) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("NEEDS YOUR OK")
-                    .font(.lunaBadge)
-                    .tracking(0.8)
-                    .foregroundStyle(LunaColor.onLime)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(LunaColor.lime, in: Capsule())
-                Spacer()
-                if let shown = call.approvalShownAt {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let left = max(0, Int(Self.approvalSeconds - context.date.timeIntervalSince(shown)))
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let left = call.approvalShownAt.map {
+                Int(LunaNativeVoice.approvalSecondsLeft(shownAt: $0, now: context.date).rounded(.up))
+            }
+            let expired = left == 0
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(expired ? "EXPIRED" : "NEEDS YOUR OK")
+                        .font(.lunaBadge)
+                        .tracking(0.8)
+                        .foregroundStyle(LunaColor.onLime)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(expired ? LunaColor.warning : LunaColor.lime, in: Capsule())
+                    Spacer()
+                    if let left {
                         Text(left > 0 ? String(format: "%d:%02d", left / 60, left % 60) : "Expired")
                             .font(.subheadline.weight(.semibold).monospacedDigit())
                             .foregroundStyle(left > 20 ? LunaColor.onEmphasisSecondary : LunaColor.warning)
                             .accessibilityLabel(left > 0 ? "\(left) seconds left" : "Expired")
                     }
                 }
+                Text(approval.summary)
+                    .font(.system(.title3, weight: .bold))
+                    .fixedSize(horizontal: false, vertical: true)
+                ApprovalDetail(approval: approval)
+                Text(expired
+                     ? "This request expired, so nothing was done. Ask Luna again if you still want it."
+                     : "Nothing happens unless you tap Approve or double-tap your glasses.")
+                    .font(.footnote)
+                    .foregroundStyle(LunaColor.onEmphasisSecondary)
+                    .accessibilityIdentifier(expired ? "call.approval.expired" : "call.approval.hint")
+                HStack(spacing: 10) {
+                    Button("Decline") { call.decideApproval(false) }
+                        .buttonStyle(LunaSecondaryActionStyle(tint: LunaColor.onEmphasis, fill: Color.white.opacity(0.12)))
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("call.approval.decline")
+                    Button(call.approvalBusy ? "Approving…" : "Approve") { call.decideApproval(true) }
+                        .buttonStyle(LunaLimeCapsuleStyle())
+                        .accessibilityIdentifier("call.approval.approve")
+                }
+                .disabled(call.approvalBusy || expired)
+                .opacity(expired ? 0.45 : 1)
             }
-            Text(approval.summary)
-                .font(.system(.title3, weight: .bold))
-                .fixedSize(horizontal: false, vertical: true)
-            ApprovalDetail(approval: approval)
-            Text("Nothing happens unless you tap Approve or double-tap your glasses.")
-                .font(.footnote)
-                .foregroundStyle(LunaColor.onEmphasisSecondary)
-            HStack(spacing: 10) {
-                Button("Decline") { call.decideApproval(false) }
-                    .buttonStyle(LunaSecondaryActionStyle(tint: LunaColor.onEmphasis, fill: Color.white.opacity(0.12)))
-                    .frame(maxWidth: .infinity)
-                    .accessibilityIdentifier("call.approval.decline")
-                Button(call.approvalBusy ? "Approving…" : "Approve") { call.decideApproval(true) }
-                    .buttonStyle(LunaLimeCapsuleStyle())
-                    .accessibilityIdentifier("call.approval.approve")
-            }
-            .disabled(call.approvalBusy)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(LunaMetrics.cardPadding)
+            .lunaEmphasisCard(radius: 28)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("call.approval")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(LunaMetrics.cardPadding)
-        .lunaEmphasisCard(radius: 28)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("call.approval")
     }
 
     // MARK: Contact
