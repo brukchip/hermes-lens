@@ -801,6 +801,10 @@ final class LunaNativeSession {
         }
         approvalBusy = true
         trace("approval.decided", detail: "approve=\(approve)")
+        // Recorded at the tap, so the call record has it even if the call ends while the action
+        // is carried out; corrected below if the server could not carry it out.
+        let recorded = actions.count
+        actions.append(LunaCallAction(summary: approval.summary, approved: approve))
         Task { [weak self, broker] in
             // Speak at once: carrying out the action takes seconds, and silence after a
             // tap sounds like nothing happened (2026-10-31).
@@ -835,7 +839,9 @@ final class LunaNativeSession {
                 note = "The user tapped \(tapped), but the back office could not be reached. Tell them briefly."
             }
             try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's back office] " + note))
-            self.actions.append(LunaCallAction(summary: approval.summary, approved: approve && result != nil))
+            if approve, result == nil, self.actions.indices.contains(recorded) {
+                self.actions[recorded] = LunaCallAction(summary: approval.summary, approved: false)
+            }
             self.trace("approval.result", detail: "ok=\(result != nil) next=\(result?.approval != nil) "
                 + "status=\(refused?.status ?? 0)")
         }
