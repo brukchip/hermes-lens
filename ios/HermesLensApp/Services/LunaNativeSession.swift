@@ -147,6 +147,7 @@ final class LunaNativeSession {
     @ObservationIgnored private var closingTask: Task<Void, Never>?
     @ObservationIgnored private var setupDeadline: Task<Void, Never>?
     @ObservationIgnored private var durationDeadline: Task<Void, Never>?
+    @ObservationIgnored private var endingWarning: Task<Void, Never>?
     @ObservationIgnored private var turnDeadline: Task<Void, Never>?
     @ObservationIgnored private var writeDeadline: Task<Void, Never>?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -272,6 +273,16 @@ final class LunaNativeSession {
                 }
             }
             let remaining = min(TimeInterval(call.maxSeconds), call.expiresAt.timeIntervalSinceNow - 2)
+            if let delay = LunaCallEnding.warningDelay(remaining: remaining) {
+                // Luna says once that the call is about to end, so the end doesn't sound like a drop.
+                endingWarning = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard !Task.isCancelled, let self, generation == self.state.generation,
+                          [.listening, .responding, .speaking].contains(self.state.phase), let socket = self.socket else { return }
+                    self.trace("call.ending_warned")
+                    try? await socket.sendMessage(LunaNativeWire.text(LunaCallEnding.note))
+                }
+            }
             durationDeadline = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(max(1, remaining)))
                 guard !Task.isCancelled, let self, generation == self.state.generation else { return }
@@ -953,8 +964,9 @@ final class LunaNativeSession {
         approvalBusy || tools.contains { !LunaNativeVoice.localTools.contains($0.name) }
     }
 
-    /// A soft cue on the glasses while the back office works and nobody is talking:
-    /// first after 1.5 s of quiet, then every 2.5 s. Luna's voice stops it at once.
+    /// A soft cue on the glasses while the back office works and nobody is talking: first
+    /// after 1.5 s of quiet, then every 10 s, never after a minute (`LunaWorkingTone`).
+    /// Luna's voice stops it at once.
     private func startThinkingCue(generation: UUID) {
         thinkingTask?.cancel()
         thinkingTask = Task { [weak self] in
@@ -969,9 +981,10 @@ final class LunaNativeSession {
                 let quiet = now > self.speechPlaysUntil + 0.3 && now - self.lastSpeechAt > 1
                 guard self.backOfficeWorking, quiet, ![.idle, .connecting, .failed, .ended].contains(self.state.phase)
                 else { quietFor = 0; continue }
+                let before = quietFor
                 quietFor += 0.5
-                if quietFor >= 1.5, (quietFor - 1.5).truncatingRemainder(dividingBy: 2.5) == 0 {
-                    if quietFor == 1.5 { self.trace("thinking.cue") }
+                if LunaWorkingTone.plays(from: before, to: quietFor) {
+                    if before < LunaWorkingTone.firstAfter { self.trace("thinking.cue") }
                     self.playThinkingCue()
                 }
             }
@@ -1185,6 +1198,7 @@ final class LunaNativeSession {
         gate?.setMuted(true); outbound?.finish(); outbound = nil
         receiveTask?.cancel(); receiveTask = nil; sendTask?.cancel(); sendTask = nil
         setupDeadline?.cancel(); setupDeadline = nil; durationDeadline?.cancel(); durationDeadline = nil
+        endingWarning?.cancel(); endingWarning = nil
         turnDeadline?.cancel(); turnDeadline = nil; writeDeadline?.cancel(); writeDeadline = nil
         observers.forEach(NotificationCenter.default.removeObserver); observers = []
         if hasTap { engine?.inputNode.removeTap(onBus: 0); hasTap = false }
