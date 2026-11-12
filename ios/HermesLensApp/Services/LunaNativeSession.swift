@@ -528,6 +528,13 @@ final class LunaNativeSession {
                 self.showApproval(card, arrivedAt: .now, fromTalkedOver: true)
             }
             return
+        case .busy(let answer):
+            // A talked-over request still holds the server's chat: answer at once, no request
+            // that would only queue behind it and time out.
+            trace("tool.busy", detail: "name=\(Self.toolLabel(call.name))")
+            Task { try? await socket.sendMessage(LunaNativeWire.toolResponse(
+                id: call.id, name: call.name, response: LunaNativeWire.toolResult(answer))) }
+            return
         }
         let started = ProcessInfo.processInfo.systemUptime
         let crowded = toolTasks.count >= 4

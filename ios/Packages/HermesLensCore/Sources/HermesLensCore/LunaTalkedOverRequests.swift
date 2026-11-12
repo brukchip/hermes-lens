@@ -59,21 +59,36 @@ public struct LunaTalkedOverRequests: Sendable {
         case adopt(String)
         /// The same request already finished while talked over: answer with this result now.
         case answer(LunaNativeToolResult)
+        /// A talked-over request still runs (the server works on one request per chat at a
+        /// time, so another would queue behind it and time out): answer on the phone at once
+        /// with this text, without asking the server.
+        case busy(String)
     }
 
+    public static let busyAnswer = "The user's earlier request is still running. Tell them you'll share its "
+        + "result when it's back, and to ask this again after that."
+    public static let busyWithoutPhotosAnswer = "The user's earlier request is still running, without the "
+        + "photos. Tell them you'll share its result when it's back, and to ask again with the photos after that."
+
     /// Matches the request text, ignoring case and spacing; a run answers at most one repeat.
+    /// While a talked-over request still runs, any other back-office request is answered busy.
     public mutating func route(_ call: LunaNativeToolCall) -> Route {
-        guard Self.keepsRunningWhenTalkedOver(call.name), let request = call.request else { return .run }
-        let wanted = Self.normalized(request)
-        guard let id = runs.keys.sorted().first(where: { runs[$0]?.request == wanted }), let run = runs[id]
-        else { return .run }
-        if let finished = run.finished {
-            runs[id] = nil
-            return .answer(finished)
+        guard Self.keepsRunningWhenTalkedOver(call.name) else { return .run }
+        let wanted = call.request.map(Self.normalized)
+        if let wanted, let id = runs.keys.sorted().first(where: { runs[$0]?.request == wanted }), let run = runs[id] {
+            if let finished = run.finished, !call.attachesPhotos || run.attachesPhotos {
+                runs[id] = nil
+                return .answer(finished)
+            }
+            if run.finished == nil {
+                // A repeat that adds photos the run does not have cannot be answered by it.
+                if call.attachesPhotos && !run.attachesPhotos { return .busy(Self.busyWithoutPhotosAnswer) }
+                guard adoptedBy[id] == nil else { return .busy(Self.busyAnswer) }
+                adoptedBy[id] = call
+                return .adopt(id)
+            }
         }
-        guard adoptedBy[id] == nil else { return .run }
-        adoptedBy[id] = call
-        return .adopt(id)
+        return isRunning ? .busy(Self.busyAnswer) : .run
     }
 
     /// What to do with a finished run's result.

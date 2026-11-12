@@ -17,6 +17,7 @@ private extension LunaTalkedOverRequests.Route {
         if case .answer(let result) = self { LunaTalkedOverRequests.resultText(result.response) } else { nil }
     }
     var runs: Bool { if case .run = self { true } else { false } }
+    var busyText: String? { if case .busy(let text) = self { text } else { nil } }
 }
 
 @Test func talkingOverCancelsCameraToolsButKeepsBackOfficeWorkRunning() {
@@ -102,4 +103,29 @@ private extension LunaTalkedOverRequests.Route {
     let detached = LunaTalkedOverRequests.detachedNote(request: "Email the report")
     #expect(detached.contains("still running") && detached.contains("Email the report"))
     #expect(detached.contains("Do not ask for it again"))
+}
+
+@Test func aDifferentRequestWhileATalkedOverOneRunsIsAnsweredBusyOnThePhone() {
+    var ledger = LunaTalkedOverRequests()
+    let first = ask("a", "Email the report to Sam")
+    _ = ledger.cancel(["a"], running: ["a": first])
+    #expect(ledger.route(ask("b", "What's the weather?")).busyText == LunaTalkedOverRequests.busyAnswer)
+    // The identical request is still adopted; a second repeat is busy, not a second run.
+    #expect(ledger.route(ask("c", "Email the report to Sam")).adopted == "a")
+    #expect(ledger.route(ask("d", "Email the report to Sam")).busyText != nil)
+    // Camera tools are never held back.
+    #expect(ledger.route(LunaNativeToolCall(id: "l", name: "look", request: nil)).runs)
+    // Once it finished, other requests run normally again.
+    _ = ledger.finish(first, result: result("Sent."))
+    #expect(ledger.route(ask("e", "What's the weather?")).runs)
+}
+
+@Test func aRepeatThatAddsPhotosIsNotAnsweredByARunWithout() {
+    var ledger = LunaTalkedOverRequests()
+    let first = ask("a", "Keep this receipt")
+    _ = ledger.cancel(["a"], running: ["a": first])
+    #expect(ledger.route(ask("b", "Keep this receipt", photos: true)).busyText == LunaTalkedOverRequests.busyWithoutPhotosAnswer)
+    _ = ledger.finish(first, result: result("Kept."))
+    // Finished without photos: the repeat with photos runs on its own.
+    #expect(ledger.route(ask("c", "Keep this receipt", photos: true)).runs)
 }
