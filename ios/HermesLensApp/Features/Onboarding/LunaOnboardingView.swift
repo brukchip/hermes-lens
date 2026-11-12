@@ -5,6 +5,8 @@ import SwiftUI
 /// and each permission explained before iOS asks for it.
 struct LunaOnboardingView: View {
     @Environment(AppModel.self) private var model
+    /// Opens the scripted demo call on Home (no glasses, server, microphone or camera).
+    var tryWithoutGlasses: () -> Void = {}
     @State private var page = 0
     @State private var microphone = AVAudioApplication.shared.recordPermission
 
@@ -38,8 +40,16 @@ struct LunaOnboardingView: View {
              message: "Hi, I'm Luna. Talk to me through your Ray-Ban Meta glasses. I can look at what you see, record a short clip, save a contact from a business card, and pass your requests to your own Hermes agent. Actions it gates wait for your tap.") {
             LunaCharacter(mood: .ready, size: 220)
         } action: {
-            LunaPrimaryButton(title: "Continue", systemImage: "arrow.right", identifier: "onboarding.next") {
-                withAnimation { page = 1 }
+            VStack(spacing: 12) {
+                LunaPrimaryButton(title: "Continue", systemImage: "arrow.right", identifier: "onboarding.next") {
+                    withAnimation { page = 1 }
+                }
+                Button("Try without glasses", action: tryWithoutGlasses)
+                    .font(.lunaLabel)
+                    .foregroundStyle(LunaColor.text)
+                    .frame(minHeight: 44)
+                    .accessibilityHint("Opens a short demo call. Nothing is sent anywhere.")
+                    .accessibilityIdentifier("onboarding.tryDemo")
             }
         }
     }

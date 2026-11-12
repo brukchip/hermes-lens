@@ -291,3 +291,17 @@ import UIKit
     #expect(kept.count == 4000)
     #expect(kept.last == lines.last && kept.first == "line \(lines.count - 4000)")
 }
+
+@Test @MainActor func theOnboardingDemoRunsWithoutAServerAndIsNotSaved() async throws {
+    let controller = LunaCallController()
+    var saved = false
+    controller.onFinished = { _, _, _, _ in saved = true }
+    controller.start({ LunaDemoCall() }, keepsRecord: false)
+    #expect(controller.isDemo)
+    try await Task.sleep(for: .milliseconds(800))
+    controller.call?.ask("Look at this")
+    try await Task.sleep(for: .seconds(1.5))
+    #expect(controller.call?.turns.isEmpty == false)
+    controller.end()
+    #expect(!saved && !controller.isActive)
+}

@@ -95,17 +95,23 @@ final class LunaCallController {
     /// Turns and actions from a dropped call that was retried, so the record keeps them.
     @ObservationIgnored private var carriedTurns: [LunaCallTurn] = []
     @ObservationIgnored private var carriedActions: [LunaCallAction] = []
+    /// False for the onboarding demo: it is not saved as a call record.
+    @ObservationIgnored private var keepsRecord = true
     /// Receives the finished call (start, end, turns, actions) to save as a record.
     @ObservationIgnored var onFinished: ((Date, Date, [LunaCallTurn], [LunaCallAction]) -> Void)?
 
     var isActive: Bool { call != nil }
 
+    /// The running call is the scripted demo (no server, microphone or camera).
+    var isDemo: Bool { call is LunaDemoCall }
+
     /// Starts a call, or reuses the running one. `ask` is sent once it connects.
-    func start(_ make: @escaping () -> any LunaCall, ask text: String? = nil) {
+    func start(_ make: @escaping () -> any LunaCall, ask text: String? = nil, keepsRecord: Bool = true) {
         if let call, ![.failed, .ended].contains(call.state.phase) {
             if let text { call.ask(text) }
             return
         }
+        self.keepsRecord = keepsRecord
         makeCall = make
         retriesLeft = 1
         startedAt = .now
@@ -118,7 +124,7 @@ final class LunaCallController {
             let turns = carriedTurns + call.turns
             let actions = carriedActions + call.actions
             call.end()
-            if let startedAt { onFinished?(startedAt, .now, turns, actions) }
+            if keepsRecord, let startedAt { onFinished?(startedAt, .now, turns, actions) }
         }
         call = nil
         makeCall = nil
