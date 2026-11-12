@@ -39,6 +39,8 @@ ASK_TIMEOUT_SECONDS = 60.0
 STOPPING_GRACE_SECONDS = 20.0  # how long a new question waits for a stopped turn to wind down
 STALE_TURN_SECONDS = 600.0  # a turn that never reported completion stops blocking after this
 RELEASE_POLL_SECONDS = 0.02  # how often to look whether Hermes has let go of the chat
+LOST_TURN_SECONDS = 3.0  # a turn Hermes let go of without reporting it finished is over after this
+TURN_POLL_SECONDS = 0.1
 APPROVAL_TTL_SECONDS = 120.0
 RATE_LIMIT = (30, 60.0)  # requests per window per device
 GLOBAL_RATE_LIMIT = (120, 60.0)  # all devices together: the device id is self-asserted
@@ -114,6 +116,8 @@ class HermesLensAdapter(BasePlatformAdapter):
         # chat -> (event id, started, finished) for the Hermes turn still running in that chat.
         # A new message sent while a stopped turn winds down is folded into the dying turn and lost.
         self._lens_turns: Dict[str, tuple] = {}
+        # chat -> [event id, released at or None]: a turn Hermes was seen running, and when it let go
+        self._held: Dict[str, list] = {}
         self._active_call: Dict[str, str] = {}
         self._chat_locks: Dict[str, asyncio.Lock] = {}
         self._cards: Dict[str, _Card] = {}
@@ -222,6 +226,10 @@ class HermesLensAdapter(BasePlatformAdapter):
         asked for it. A late finish of an older turn (stopped, timed out) answers nobody."""
         await super().on_processing_complete(event, outcome)
         chat_id = getattr(event.source, "chat_id", "")
+        if not self._turn_messages.get(chat_id) and self._gateway_starting():
+            # Hermes parks messages that arrive while it restores sessions at startup and reports
+            # them complete at once; it runs them later under the same id. Keep waiting.
+            return
         messages = self._turn_messages.pop(chat_id, [])
         self._drop_cards(chat_id, event_id=getattr(event, "message_id", None))
         running = self._lens_turns.get(chat_id)
@@ -258,6 +266,12 @@ class HermesLensAdapter(BasePlatformAdapter):
             if request_id:
                 with contextlib.suppress(Exception):
                     self._resolve(card, "deny")
+            elif entry is not None and not entry[1].done():
+                # No way to tell which approval this is: stop the run (Hermes denies what it
+                # was waiting on) and say so, instead of leaving the call waiting a minute.
+                entry[1].set_result(("failed", "Your Hermes agent asked to do something I can't show "
+                                               "you on a card, so I stopped it. Nothing was done."))
+                await self._stop(prompt.chat_id, device_id)
             return SendResult(success=False, error="No live call to show the approval on")
         self._cards[card.id] = card
         entry[1].set_result(("approval", card))
@@ -343,6 +357,10 @@ class HermesLensAdapter(BasePlatformAdapter):
         self._asks[key] = (time.monotonic(), None)
         try:
             async with self._chat_locks.setdefault(chat_id, asyncio.Lock()):
+                if any(card.chat_id == chat_id for card in self._cards.values()):
+                    self._asks.pop(key, None)  # a card appeared while this ask waited for the lock
+                    return web.json_response({"response": voice.answer(voice.APPROVAL_PENDING)},
+                                             headers={"Cache-Control": "no-store"})
                 if not await self._previous_turn_finished(chat_id):
                     self._asks.pop(key, None)
                     return web.json_response({"response": voice.failure(
@@ -396,6 +414,9 @@ class HermesLensAdapter(BasePlatformAdapter):
                 raise voice.VoiceRequestError(404, "native_approval_not_found")
         if decision == "deny":
             start()
+            # The run continues after a denied tool and could try another way with nobody
+            # listening: stop it, so "nothing was done" stays true.
+            await self._stop(card.chat_id, device_id)
             return web.json_response({"response": voice.answer("Declined; nothing was done.")},
                                      headers={"Cache-Control": "no-store"})
         async with self._chat_locks.setdefault(card.chat_id, asyncio.Lock()):
@@ -411,6 +432,12 @@ class HermesLensAdapter(BasePlatformAdapter):
             start()
             deadline = time.monotonic() + ASK_TIMEOUT_SECONDS
             while not waiter.done():
+                if self._turn_lost(chat_id, event_id):
+                    messages = self._turn_messages.pop(chat_id, [])
+                    self._lens_turns.pop(chat_id, None)
+                    waiter.set_result(("answer", messages[-1]) if messages else
+                                      ("failed", "Your Hermes agent did not answer. Try again."))
+                    break
                 if request.transport is None or request.transport.is_closing():
                     await self._stop(chat_id, device_id)
                     return web.Response(status=499)
@@ -419,7 +446,7 @@ class HermesLensAdapter(BasePlatformAdapter):
                     return web.json_response({"response": voice.failure(
                         "That is taking longer than a call allows, so I stopped it. "
                         "Ask me to run it in the background instead.")}, headers={"Cache-Control": "no-store"})
-                await asyncio.wait({waiter}, timeout=0.5)
+                await asyncio.wait({waiter}, timeout=TURN_POLL_SECONDS)
             kind, value = waiter.result()
         finally:
             if self._waiters.get(chat_id, (None, None))[1] is waiter:
@@ -443,31 +470,60 @@ class HermesLensAdapter(BasePlatformAdapter):
         self._spawn(self.handle_message(event))
 
     async def _previous_turn_finished(self, chat_id: str) -> bool:
-        """Wait briefly for the chat's previous Hermes turn (usually one just stopped or
-        declined) to end, and for Hermes to let go of the chat."""
+        """Wait briefly until Hermes can take a new message for this chat: the previous turn
+        (usually one just stopped or declined) has ended, Hermes has let go of the chat, and the
+        gateway is not still restoring sessions after a start."""
         deadline = time.monotonic() + STOPPING_GRACE_SECONDS
-        running = self._lens_turns.get(chat_id)
-        if running is not None:
-            if time.monotonic() - running[1] > STALE_TURN_SECONDS:
-                self._lens_turns.pop(chat_id, None)
-                return True
-            try:
-                await asyncio.wait_for(running[2].wait(), STOPPING_GRACE_SECONDS)
-            except asyncio.TimeoutError:
+        while True:
+            running = self._lens_turns.get(chat_id)
+            if running is None or running[2].is_set():
+                break
+            if time.monotonic() - running[1] > STALE_TURN_SECONDS or self._turn_lost(chat_id, running[0]):
+                self._lens_turns.pop(chat_id, None)  # Hermes let go without reporting it
+                break
+            if time.monotonic() > deadline:
                 return False
-        while self._hermes_holds(chat_id):
+            await asyncio.sleep(TURN_POLL_SECONDS)
+        deadline = time.monotonic() + STOPPING_GRACE_SECONDS  # its own budget: release is quick
+        while self._hermes_holds(chat_id) or self._gateway_starting():
             if time.monotonic() > deadline:
                 return False
             await asyncio.sleep(RELEASE_POLL_SECONDS)
         return True
 
-    def _hermes_holds(self, chat_id: str) -> bool:
-        """Hermes reports a turn complete a moment before it releases the chat. A message sent
-        in that gap is queued as a follow-up whose completion is never reported, so its answer
-        would reach nobody: the next request waits until the chat is free."""
+    def _hermes_holds(self, chat_id: str) -> Optional[bool]:
+        """Whether Hermes still owns a turn in this chat; None when this core does not say.
+        Hermes reports a turn complete a moment before it releases the chat, and a message sent
+        in that gap is queued as a follow-up whose completion is never reported."""
+        sessions = getattr(self, "_active_sessions", None)
+        if sessions is None:
+            return None
         try:
-            return any(chat_id in str(key) for key in list(getattr(self, "_active_sessions", None) or ()))
-        except Exception:  # a core without this bookkeeping: behave as before
+            return any(chat_id in str(key) for key in list(sessions))
+        except Exception:
+            return None
+
+    def _turn_lost(self, chat_id: str, event_id: str) -> bool:
+        """Hermes was seen running this turn and has let go of the chat for a while without
+        reporting it finished (dropped, or merged into another message): nobody should wait on
+        it. A turn Hermes has not picked up yet (a slow or busy machine) is never lost."""
+        holds = self._hermes_holds(chat_id)
+        seen = self._held.get(chat_id)
+        if holds:
+            self._held[chat_id] = [event_id, None]
+            return False
+        if holds is None or seen is None or seen[0] != event_id or self._gateway_starting():
+            return False
+        now = time.monotonic()
+        if seen[1] is None:
+            seen[1] = now
+        return now - seen[1] > LOST_TURN_SECONDS
+
+    def _gateway_starting(self) -> bool:
+        """Hermes restores sessions after a start and parks new messages until it is done."""
+        try:
+            return bool(getattr(getattr(self, "gateway_runner", None), "_startup_restore_in_progress", False))
+        except Exception:
             return False
 
     def _spawn(self, coroutine) -> asyncio.Task:
@@ -509,8 +565,9 @@ class HermesLensAdapter(BasePlatformAdapter):
         from tools import approval
         resolve_card = getattr(approval, "resolve_gateway_approval_card", None)
         if resolve_card is not None:
-            return resolve_card(card.session_key, choice, card.request_id)
-        return approval.resolve_gateway_approval(card.session_key, choice, request_id=card.request_id)
+            return resolve_card(session_key=card.session_key, choice=choice, request_id=card.request_id)
+        return approval.resolve_gateway_approval(session_key=card.session_key, choice=choice,
+                                                 request_id=card.request_id)
 
     async def _sweep(self) -> None:
         while True:
@@ -541,6 +598,9 @@ class HermesLensAdapter(BasePlatformAdapter):
             if now - started > STALE_TURN_SECONDS:
                 del self._lens_turns[chat_id]
         busy = set(self._waiters) | set(self._lens_turns) | {card.chat_id for card in self._cards.values()}
+        for chat_id in list(self._held):
+            if chat_id not in busy:
+                del self._held[chat_id]
         for chat_id, lock in list(self._chat_locks.items()):
             if chat_id not in busy and not lock.locked():
                 del self._chat_locks[chat_id]
@@ -609,15 +669,15 @@ def _digest(token: str) -> bytes:
 
 
 def _pending_request_id(session_key: str) -> Optional[str]:
-    """Hermes queues an approval before it asks the adapter to show it, and a session runs one
-    turn at a time, so the newest pending entry is the one being shown. Older cores do not pass
-    its id on the prompt; without the id a tap would resolve the session's oldest approval."""
+    """Hermes 0.22.x does not put the request id on the prompt. Hermes queues an approval
+    before it asks the adapter to show it, so when exactly one is pending it is the one being
+    shown. With several pending there is no telling which, so there is no card (a deny)."""
     try:
         from tools import approval
         pending = approval.list_gateway_approvals(session_key)
     except Exception:
         return None
-    request_id = pending[-1].get("request_id") if pending else None
+    request_id = pending[0].get("request_id") if len(pending) == 1 else None
     return str(request_id) if request_id else None
 
 
@@ -695,7 +755,9 @@ def _describe(tool_name: str, args: dict) -> str:
         if isinstance(value, (list, tuple, set)):
             value = ", ".join(str(item) for item in value)
         text = " ".join(str(value if value is not None else "").split())
-        return text if len(text) <= MAX_VALUE_CHARS else f"{text[:MAX_VALUE_CHARS]} … [cut]"
+        if len(text) <= MAX_VALUE_CHARS:
+            return text
+        return f"{text[:MAX_VALUE_CHARS]} … [{len(text) - MAX_VALUE_CHARS} more characters not shown]"
 
     def given(key: str) -> str:
         value = args.get(key)

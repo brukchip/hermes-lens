@@ -77,7 +77,8 @@ def server(monkeypatch, tmp_path):
     adapter.handle_message = fake.handle
     import tools.approval as approval
     monkeypatch.setattr(approval, "resolve_gateway_approval_card",
-                        lambda key, choice, rid: fake.resolve(key, choice, rid), raising=False)
+                        lambda session_key, choice, request_id, **kw: fake.resolve(session_key, choice, request_id),
+                        raising=False)
 
     async def post(url, key, body):
         return 200, {"name": "auth_tokens/test"}
@@ -177,6 +178,8 @@ def test_decline_denies_and_answers_at_once(server):
                                         headers=headers())).json()
     assert "Declined" in run(app, scenario)["response"]["result"]
     assert fake.resolved == [("session-1", "deny", "req-1")]
+    # The run would continue after the denied tool with nobody listening: it is stopped too.
+    assert [e.text for e in fake.events] == ["send it", "/stop"]
 
 
 def test_another_phone_cannot_answer_the_card(server):
@@ -260,17 +263,17 @@ def test_the_card_shows_the_command_itself_and_the_safety_flag(server):
     assert card["detail"] == "send_message to=Sam" and card["risky"] is True
 
 
-def test_older_cores_resolve_the_exact_pending_approval_never_the_oldest(server, monkeypatch):
+def test_older_cores_resolve_the_exact_pending_approval(server, monkeypatch):
     """Hermes 0.22.x passes no request_id on the prompt: the card takes it from the queue."""
     adapter, fake, app = server
     import tools.approval as approval
     monkeypatch.delattr(approval, "resolve_gateway_approval_card", raising=False)
     exact = []
     monkeypatch.setattr(approval, "list_gateway_approvals",
-                        lambda key: [{"request_id": "older"}, {"request_id": "newest"}], raising=False)
+                        lambda key: [{"request_id": "only"}], raising=False)
     monkeypatch.setattr(approval, "resolve_gateway_approval",
-                        lambda key, choice, request_id=None, **kw: exact.append(request_id)
-                        or fake.resolve(key, choice, request_id), raising=False)
+                        lambda session_key, choice, request_id=None, **kw: exact.append(request_id)
+                        or fake.resolve(session_key, choice, request_id), raising=False)
     original = fake._turn
 
     async def turn_without_request_id(event):
@@ -293,7 +296,37 @@ def test_older_cores_resolve_the_exact_pending_approval_never_the_oldest(server,
         return await (await client.post("/v1/lens/native/approvals", data=json.dumps(tap),
                                         headers=headers())).json()
     assert run(app, scenario)["response"]["result"] == "Sent."
-    assert exact == ["newest"]
+    assert exact == ["only"]
+
+
+def test_older_cores_with_several_pending_approvals_show_no_card_and_stop_the_run(server, monkeypatch):
+    """With two approvals pending there is no telling which one the prompt is about: a tap must
+    never approve a different action than the card shows."""
+    adapter, fake, app = server
+    import tools.approval as approval
+    monkeypatch.delattr(approval, "resolve_gateway_approval_card", raising=False)
+    monkeypatch.setattr(approval, "list_gateway_approvals",
+                        lambda key: [{"request_id": "older"}, {"request_id": "newest"}], raising=False)
+    original = fake._turn
+
+    async def turn_without_request_id(event):
+        if "send it" in event.text:
+            prompt = SimpleNamespace(chat_id=event.source.chat_id, session_key="session-1",
+                                     command="send_message", description="Send it", smart_denied=False)
+            await adapter._send_exec_approval_prompt(prompt)
+            return
+        await original(event)
+    fake._turn = turn_without_request_id
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        body = await (await ask(client, call_id, "send it")).json()
+        await asyncio.sleep(0.05)
+        return body
+    body = run(app, scenario)
+    assert "approval" not in body and "Nothing was done" in body["response"]["error"]
+    assert adapter._cards == {} and fake.resolved == []
+    assert [e.text for e in fake.events][-1] == "/stop"
 
 
 def test_without_an_approval_id_nothing_is_resolved_and_no_card_is_shown(server, monkeypatch):
@@ -494,6 +527,114 @@ def test_a_chat_hermes_never_releases_gets_a_plain_answer(server, monkeypatch):
         return await (await ask(client, await start_call(client), "hello")).json()
     assert "still finishing" in run(app, scenario)["response"]["error"]
     assert fake.events == []
+
+
+def test_a_turn_hermes_let_go_of_without_reporting_it_does_not_block_the_next_question(server, monkeypatch):
+    """Hermes can drop a message's completion (merged into another queued message). Once it no
+    longer holds the chat, the turn is over after a short wait, not after ten minutes."""
+    adapter, fake, app = server
+    monkeypatch.setattr(lens, "LOST_TURN_SECONDS", 0.3)
+    original = fake.handle
+    session = f"agent:main:hermes_lens:dm:lens-{DEVICE}"
+
+    async def handle(event):
+        if event.text == "lost":
+            fake.events.append(event)
+            adapter._active_sessions[session] = asyncio.Event()
+            await asyncio.sleep(0.4)
+            del adapter._active_sessions[session]  # released, completion never reported
+            return
+        await original(event)
+    adapter.handle_message = handle
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        started = asyncio.get_running_loop().time()
+        lost = await (await ask(client, call_id, "lost")).json()
+        waited = asyncio.get_running_loop().time() - started
+        return lost, waited, await (await ask(client, call_id, "hello")).json()
+    lost, waited, nxt = run(app, scenario)
+    assert "did not answer" in lost["response"]["error"] and waited < 5
+    assert nxt["response"]["result"] == "Answer: hello"
+
+
+def test_a_turn_hermes_is_slow_to_pick_up_is_never_given_up_early(server, monkeypatch):
+    """On a busy machine Hermes can take seconds to start a turn. Not seen running is not lost:
+    answering "did not answer" would leave the request to run with nobody listening."""
+    adapter, fake, app = server
+    monkeypatch.setattr(lens, "LOST_TURN_SECONDS", 0.1)
+    original = fake.handle
+    session = f"agent:main:hermes_lens:dm:lens-{DEVICE}"
+
+    async def handle(event):
+        await asyncio.sleep(0.6)  # nothing registered yet
+        adapter._active_sessions[session] = asyncio.Event()
+        try:
+            await original(event)
+        finally:
+            del adapter._active_sessions[session]
+    adapter.handle_message = handle
+
+    async def scenario(client):
+        return await (await ask(client, await start_call(client), "hello")).json()
+    assert run(app, scenario)["response"]["result"] == "Answer: hello"
+
+
+def test_a_question_during_gateway_startup_waits_and_gets_its_own_answer(server, monkeypatch):
+    """Hermes parks messages while it restores sessions at startup and reports them complete at
+    once, then runs them later under the same id. The phone gets the real answer, not "did not
+    answer", and the question is not left to run with nobody waiting."""
+    adapter, fake, app = server
+    runner = SimpleNamespace(_startup_restore_in_progress=True)
+    adapter.gateway_runner = runner
+
+    async def scenario(client):
+        call_id = await start_call(client)
+
+        async def restore_done():
+            await asyncio.sleep(0.3)
+            runner._startup_restore_in_progress = False
+        asyncio.get_running_loop().create_task(restore_done())
+        return await (await ask(client, call_id, "hello")).json()
+    assert run(app, scenario)["response"]["result"] == "Answer: hello"
+    assert [e.text for e in fake.events] == ["hello"]
+
+
+def test_a_message_parked_by_a_starting_gateway_is_answered_when_hermes_runs_it(server, monkeypatch):
+    adapter, fake, app = server
+    from gateway.platforms.event import ProcessingOutcome
+    runner = SimpleNamespace(_startup_restore_in_progress=False)
+    adapter.gateway_runner = runner
+    original = fake.handle
+
+    async def handle(event):
+        if not getattr(event, "_replayed", False):  # parked: reported complete with no answer
+            runner._startup_restore_in_progress = True
+            await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+            await asyncio.sleep(0.2)
+            runner._startup_restore_in_progress = False
+            event._replayed = True
+        await original(event)
+    adapter.handle_message = handle
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        return await (await ask(client, call_id, "hello")).json()
+    assert run(app, scenario)["response"]["result"] == "Answer: hello"
+
+
+def test_a_card_that_appears_while_a_question_waits_for_the_chat_is_not_interrupted(server):
+    adapter, fake, app = server
+
+    async def scenario(client):
+        call_id = await start_call(client)
+        first = asyncio.ensure_future(ask(client, call_id, "send it"))
+        await asyncio.sleep(0)  # the second question passes the early check before the card exists
+        second = await (await ask(client, call_id, "what time is it")).json()
+        await first
+        return second
+    assert "waiting" in run(app, scenario)["response"]["result"]
+    assert [e.text for e in fake.events] == ["send it"]
 
 
 def test_a_turn_that_never_winds_down_gets_a_plain_answer_not_a_lost_question(server, monkeypatch):
