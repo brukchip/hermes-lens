@@ -438,6 +438,11 @@ public struct LunaNativeCallState: Equatable, Sendable {
     public private(set) var transcript = ""
     /// The user's current utterance (display only). Starts fresh with each new turn.
     public private(set) var heard = ""
+    /// True when `heard` began after Luna's current `transcript`: a new question, shown
+    /// below her previous answer until she replies.
+    public private(set) var heardIsLatest = false
+    /// The whole conversation in spoken order, for the call record.
+    public private(set) var log = LunaTranscriptLog()
     private var userTurnOpen = false
     public private(set) var interrupted = false
     public private(set) var generation = UUID()
@@ -466,12 +471,14 @@ public struct LunaNativeCallState: Equatable, Sendable {
         clearPlayback()
         turnIsComplete = true
         phase = .listening
+        log.lunaStopped()
     }
 
     private mutating func startResponse() {
         if !responseInProgress {
             clearPlayback()
             responseInProgress = true; turnIsComplete = false; transcript = ""; interrupted = false
+            heardIsLatest = false
         }
     }
 
@@ -481,13 +488,15 @@ public struct LunaNativeCallState: Equatable, Sendable {
         switch event {
         case .ready: connected()
         case .inputTranscript(let text):
-            if !userTurnOpen { heard = ""; userTurnOpen = true }
+            if !userTurnOpen { heard = ""; userTurnOpen = true; heardIsLatest = true }
             heard = String((heard + text).suffix(4_000))
+            log.user(text)
             if phase == .listening { phase = .responding }
         case .outputTranscript(let text):
             userTurnOpen = false
             guard !suppressingOutput else { return false }
             startResponse(); transcript = String((transcript + text).prefix(16_000))
+            log.luna(text)
             if phase != .speaking { phase = .responding }
         case .audio(let data):
             userTurnOpen = false
@@ -501,6 +510,7 @@ public struct LunaNativeCallState: Equatable, Sendable {
         case .generationComplete: break // Not an audible or complete-turn boundary.
         case .turnComplete:
             turnIsComplete = true; suppressingOutput = false
+            log.turnEnded()
             if queuedAudioBytes == 0 { responseInProgress = false; phase = .listening }
         case .failure: fail()
         case .goAway, .usage, .toolCalls, .toolCancellation: break

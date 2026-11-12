@@ -46,12 +46,13 @@ struct LunaCallPanel: View {
 
     private var captions: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !call.state.heard.isEmpty {
-                captionLine(speaker: "You", text: call.state.heard, font: .body, color: LunaColor.secondaryText)
-            }
-            if !call.state.transcript.isEmpty {
-                captionLine(speaker: "Luna", text: call.state.transcript,
-                            font: .system(.title3, weight: .semibold), color: LunaColor.text)
+            // A new question goes below Luna's previous answer until she replies to it.
+            if call.state.heardIsLatest {
+                lunaCaption
+                youCaption
+            } else {
+                youCaption
+                lunaCaption
             }
             if call.state.interrupted {
                 Label("Interrupted", systemImage: "pause.circle")
@@ -66,6 +67,19 @@ struct LunaCallPanel: View {
         .onTapGesture { withAnimation(.snappy) { showsFullCaptions.toggle() } }
         .accessibilityIdentifier("call.captions")
         .accessibilityHint(showsFullCaptions ? "Shows less" : "Shows the full text")
+    }
+
+    @ViewBuilder private var youCaption: some View {
+        if !call.state.heard.isEmpty {
+            captionLine(speaker: "You", text: call.state.heard, font: .body, color: LunaColor.secondaryText)
+        }
+    }
+
+    @ViewBuilder private var lunaCaption: some View {
+        if !call.state.transcript.isEmpty {
+            captionLine(speaker: "Luna", text: call.state.transcript,
+                        font: .system(.title3, weight: .semibold), color: LunaColor.text)
+        }
     }
 
     private func captionLine(speaker: String, text: String, font: Font, color: Color) -> some View {

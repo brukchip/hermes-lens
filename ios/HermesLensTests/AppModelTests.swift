@@ -198,12 +198,11 @@ import UIKit
     #expect(await store.load().isEmpty)
 }
 
-@Test func turnRecorderNeverRecordsATurnTwice() {
-    var turns: [LunaCallTurn] = []
-    turns.record(heard: "How did the launch go?", said: "")
-    turns.record(heard: "How did the launch go?", said: "Sales were up.")
-    turns.record(heard: "How did the launch go?", said: "Sales were up.")
-    #expect(turns == [.init(speaker: .you, text: "How did the launch go?"), .init(speaker: .luna, text: "Sales were up.")])
+@Test func callTurnsFollowTheSpokenOrderAndKeepRepeats() {
+    var log = LunaTranscriptLog()
+    for answer in ["Shall I send it?", "Sent."] { log.user("Yes"); log.luna(answer); log.turnEnded() }
+    #expect([LunaCallTurn](log) == [.init(speaker: .you, text: "Yes"), .init(speaker: .luna, text: "Shall I send it?"),
+                                    .init(speaker: .you, text: "Yes"), .init(speaker: .luna, text: "Sent.")])
 }
 
 @Test @MainActor func endingADemoCallHandsOverItsTurnsAndActions() async throws {

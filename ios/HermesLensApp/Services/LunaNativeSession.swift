@@ -106,7 +106,7 @@ final class LunaNativeSession {
     /// When the current approval card appeared (for its countdown).
     private(set) var approvalShownAt: Date?
     /// The conversation so far, kept in memory and handed to the call record at End.
-    private(set) var turns: [LunaCallTurn] = []
+    var turns: [LunaCallTurn] { [LunaCallTurn](state.log) }
     /// Actions the user approved or declined during this call.
     private(set) var actions: [LunaCallAction] = []
     /// The look photos taken in this call (newest last, at most four, at most 1440 px), kept in
@@ -296,7 +296,6 @@ final class LunaNativeSession {
             if let pendingAsk { self.pendingAsk = nil; ask(pendingAsk) }
             return
         case .interrupted:
-            turns.record(heard: state.heard, said: state.transcript)
             state.interrupt(manual: false); stopPlayback()
             firstOutputInTurn = true; turnDeadline?.cancel(); trace("turn.interrupted")
             return
@@ -336,7 +335,6 @@ final class LunaNativeSession {
             try play(data)
         }
         if case .turnComplete = event {
-            turns.record(heard: state.heard, said: state.transcript)
             heardInTurn = false
             turnDeadline?.cancel(); turnDeadline = nil
             firstOutputInTurn = true; trace("turn.provider_complete")

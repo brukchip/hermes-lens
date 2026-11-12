@@ -44,17 +44,9 @@ struct LunaCallAction: Codable, Hashable, Sendable {
 }
 
 extension Array where Element == LunaCallTurn {
-    /// Appends what was heard and said in a finished (or interrupted) turn,
-    /// skipping repeats so a turn is never recorded twice.
-    mutating func record(heard: String, said: String) {
-        let heard = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        let said = said.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !heard.isEmpty, !contains(where: { $0.speaker == .you && $0.text == heard }) {
-            append(LunaCallTurn(speaker: .you, text: heard))
-        }
-        if !said.isEmpty, last != LunaCallTurn(speaker: .luna, text: said) {
-            append(LunaCallTurn(speaker: .luna, text: said))
-        }
+    /// A call's conversation in spoken order (see `LunaTranscriptLog`).
+    init(_ log: LunaTranscriptLog) {
+        self = log.entries.map { LunaCallTurn(speaker: $0.speaker == .you ? .you : .luna, text: $0.text) }
     }
 }
 
@@ -174,7 +166,7 @@ final class LunaDemoCall: LunaCall {
     private(set) var approvalShownAt: Date?
     let contactDraft: LunaContactDraft? = nil
     let retryable = true
-    private(set) var turns: [LunaCallTurn] = []
+    var turns: [LunaCallTurn] { [LunaCallTurn](state.log) }
     private(set) var actions: [LunaCallAction] = []
     @ObservationIgnored private var pendingAsk: String?
 
@@ -238,7 +230,6 @@ final class LunaDemoCall: LunaCall {
     private func speak(_ text: String, generation: UUID) {
         guard generation == state.generation else { return }
         state.receive(.outputTranscript(text), generation: generation)
-        turns.record(heard: state.heard, said: state.transcript)
         state.receive(.turnComplete, generation: generation)
     }
 
