@@ -154,9 +154,9 @@ struct LunaCallPanel: View {
                     .font(.system(.title3, weight: .bold))
                     .fixedSize(horizontal: false, vertical: true)
                 ApprovalDetail(approval: approval)
-                Text(expired
-                     ? "This request expired, so nothing was done. Ask Luna again if you still want it."
-                     : "Nothing happens unless you tap Approve or double-tap your glasses.")
+                // Says whether a double tap can approve this card, and if not, why (same rule as
+                // the glasses gesture: `LunaApprovalGesture`).
+                Text(expired ? LunaApprovalGesture.Verdict.expired.hint : call.approvalGesture(now: context.date).hint)
                     .font(.footnote)
                     .foregroundStyle(LunaColor.onEmphasisSecondary)
                     .accessibilityIdentifier(expired ? "call.approval.expired" : "call.approval.hint")
