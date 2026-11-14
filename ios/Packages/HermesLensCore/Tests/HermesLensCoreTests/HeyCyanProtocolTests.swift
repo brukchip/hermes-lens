@@ -436,3 +436,67 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     #expect(!HeyCyanMediaList.looksLikeJPEG([0xFF, 0xD8]))
     #expect(HeyCyanMediaList.looksLikeJPEG(Data([0xFF, 0xD8, 0xFF, 0xDB])))
 }
+
+// MARK: Fetch plan and the manual join card
+
+@Test func withoutAutomaticJoinALookInACallKeepsThePhotoOnTheGlasses() {
+    #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: false) == .keepOnGlasses)
+    #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: true) == .automaticJoin(budgetSeconds: 25))
+    #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: true) == .automaticJoin(budgetSeconds: 45))
+    #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: false) == .manualJoin(budgetSeconds: 130))
+    // The manual budget covers the whole 90 s wait plus the photo and the download.
+    #expect(Double(HeyCyanFetchPlan.manualBudgetSeconds) > HeyCyanManualJoin.maximumWait + 30)
+}
+
+@Test func theManualJoinCardPollsEveryOneAndAHalfSecondsForNinetySeconds() {
+    var join = HeyCyanManualJoin(startedAt: 100)
+    var now = 100.0
+    while join.shouldPoll(at: now) {
+        let pollStarted = now
+        now += 0.3  // the poll itself
+        join.recordPoll(answered: false, at: now)
+        now += join.delayBeforeNextPoll(pollStartedAt: pollStarted, now: now)
+    }
+    // Polls start at 0, 1.5, … 88.5 s: 60 of them. The last ends before 90 s, so the loop stops
+    // on time rather than on an answer, and ending the card then gives up.
+    #expect(join.polls == 60)
+    #expect(join.phase == .waitingForJoin)
+    #expect(!join.shouldPoll(at: now))
+    join.end()
+    #expect(join.phase == .gaveUp)
+    #expect(join.delayBeforeNextPoll(pollStartedAt: 0, now: 0.3) == 1.2)
+    #expect(join.delayBeforeNextPoll(pollStartedAt: 0, now: 2.0) == 0)
+    #expect(HeyCyanManualJoin.probeTimeout < HeyCyanManualJoin.pollInterval)
+}
+
+@Test func anUnansweredPollAtNinetySecondsGivesUp() {
+    var join = HeyCyanManualJoin(startedAt: 0)
+    join.recordPoll(answered: false, at: 89.9)
+    #expect(join.phase == .waitingForJoin)
+    join.recordPoll(answered: false, at: 90)
+    #expect(join.phase == .gaveUp)
+    join.recordPoll(answered: true, at: 91)
+    #expect(join.phase == .gaveUp)
+    #expect(join.polls == 2)
+}
+
+@Test func anAnswerConnectsStopsPollingAndEndsFinished() {
+    var join = HeyCyanManualJoin(startedAt: 0)
+    join.recordPoll(answered: false, at: 1.5)
+    join.recordPoll(answered: true, at: 3)
+    #expect(join.phase == .connected)
+    #expect(!join.shouldPoll(at: 4))
+    join.recordPoll(answered: false, at: 4.5)
+    #expect(join.polls == 2)
+    join.end()
+    #expect(join.phase == .finished)
+    join.end()
+    #expect(join.phase == .finished)
+}
+
+@Test func endingWhileStillWaitingGivesUp() {
+    var join = HeyCyanManualJoin(startedAt: 0)
+    join.end()
+    #expect(join.phase == .gaveUp)
+    #expect(!join.shouldPoll(at: 1))
+}

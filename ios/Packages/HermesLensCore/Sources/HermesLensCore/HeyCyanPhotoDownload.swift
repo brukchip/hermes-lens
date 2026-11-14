@@ -131,3 +131,100 @@ public enum HeyCyanMediaList {
         Array(bytes.prefix(3)) == [0xFF, 0xD8, 0xFF]
     }
 }
+
+/// How a photo comes from the glasses, by where it is asked for and what the build may do.
+///
+/// Joining the glasses' Wi-Fi from the app needs the Hotspot Configuration entitlement, which
+/// personal (free) developer teams cannot use. Without it the user joins the network in
+/// Settings › Wi-Fi while the app shows its name and password: fine when they are looking at
+/// the screen, far too slow for a look in a call.
+public enum HeyCyanFetchPlan: Equatable, Sendable {
+    public enum Context: Sendable {
+        /// A call's `look`: about 25 s in total, never waiting for a person.
+        case call
+        /// The Photo flow or the Settings test: the user is watching the screen.
+        case interactive
+    }
+
+    /// The app joins the glasses' Wi-Fi itself (one system prompt).
+    case automaticJoin(budgetSeconds: Int)
+    /// The user joins it in Settings › Wi-Fi; the app waits for the glasses to answer.
+    case manualJoin(budgetSeconds: Int)
+    /// No transfer: the photo stays on the glasses.
+    case keepOnGlasses
+
+    public static let callBudgetSeconds = 25
+    public static let automaticBudgetSeconds = 45
+    /// The photo (up to ~10 s), the credentials (up to 6 s), the 90 s join wait and the download.
+    public static let manualBudgetSeconds = 130
+
+    public static func plan(for context: Context, automaticJoinAvailable: Bool) -> HeyCyanFetchPlan {
+        switch (context, automaticJoinAvailable) {
+        case (.call, true): .automaticJoin(budgetSeconds: callBudgetSeconds)
+        case (.call, false): .keepOnGlasses
+        case (.interactive, true): .automaticJoin(budgetSeconds: automaticBudgetSeconds)
+        case (.interactive, false): .manualJoin(budgetSeconds: manualBudgetSeconds)
+        }
+    }
+}
+
+/// The manual join card: the app shows the glasses' Wi-Fi name and password and asks the
+/// glasses' HTTP server every `pollInterval` until it answers or `maximumWait` has passed.
+/// Times are seconds on one monotonic clock.
+public struct HeyCyanManualJoin: Equatable, Sendable {
+    public enum Phase: Equatable, Sendable {
+        /// The card asks the user to join; the app is polling.
+        case waitingForJoin
+        /// The glasses answered on Wi-Fi; the photo is coming over.
+        case connected
+        /// Done (the photo came over or the download failed): the user may switch back.
+        case finished
+        /// The glasses never answered in time, or the attempt was stopped.
+        case gaveUp
+    }
+
+    public static let pollInterval: TimeInterval = 1.5
+    /// Each poll's HTTP timeout: shorter than the interval, so polls never pile up.
+    public static let probeTimeout: TimeInterval = 1.2
+    public static let maximumWait: TimeInterval = 90
+
+    public let startedAt: TimeInterval
+    public private(set) var phase: Phase = .waitingForJoin
+    public private(set) var polls = 0
+
+    public init(startedAt: TimeInterval) {
+        self.startedAt = startedAt
+    }
+
+    /// Whether to poll at `now`: still waiting and within `maximumWait`.
+    public func shouldPoll(at now: TimeInterval) -> Bool {
+        phase == .waitingForJoin && now - startedAt < Self.maximumWait
+    }
+
+    /// The pause after a poll that started at `pollStartedAt` and ended at `now`, so polls
+    /// start every `pollInterval`.
+    public func delayBeforeNextPoll(pollStartedAt: TimeInterval, now: TimeInterval) -> TimeInterval {
+        max(0, Self.pollInterval - (now - pollStartedAt))
+    }
+
+    /// One poll's result: an answer moves to `connected`; no answer after `maximumWait`
+    /// moves to `gaveUp`. Ignored unless waiting.
+    public mutating func recordPoll(answered: Bool, at now: TimeInterval) {
+        guard phase == .waitingForJoin else { return }
+        polls += 1
+        if answered {
+            phase = .connected
+        } else if now - startedAt >= Self.maximumWait {
+            phase = .gaveUp
+        }
+    }
+
+    /// The transfer ended: a connected card is finished, a waiting one gave up.
+    public mutating func end() {
+        switch phase {
+        case .connected: phase = .finished
+        case .waitingForJoin: phase = .gaveUp
+        case .finished, .gaveUp: break
+        }
+    }
+}
