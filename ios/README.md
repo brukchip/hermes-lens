@@ -135,12 +135,17 @@ What works:
 - **Take a test photo** takes a photo on the glasses and confirms it by their photo count.
   **Take and fetch a test photo** also brings it to the iPhone and shows a thumbnail (not
   saved, no server needed).
-- **Look** and the **Photo** button take the photo on the glasses and bring it over the
-  glasses' own Wi-Fi: the glasses open a Wi-Fi network for a moment, the iPhone asks once
-  to join it, downloads the newest photo over plain HTTP and returns to its usual network.
-  The photo is saved on this iPhone first, like a Meta photo. A look in a call gives up
-  after about 25 seconds; if the photo can't come over, Luna says so and it stays on the
-  glasses. This transfer is a beta built from community notes.
+- **The Photo button** takes the photo on the glasses and brings it over the glasses' own
+  Wi-Fi: the glasses open a Wi-Fi network for a moment, the iPhone joins it, downloads the
+  newest photo over plain HTTP and returns to its usual network. The photo is saved on this
+  iPhone first, like a Meta photo. This transfer is a beta built from community notes.
+  - **Default build:** a card shows the glasses' network name and password. Join it in
+    Settings › Wi-Fi and come back; Luna continues as soon as the glasses answer (she
+    waits up to 90 seconds), then says you can go back to your usual Wi-Fi.
+  - **With automatic joining** (see below): the iPhone asks once, "Join network…?".
+- **Look** in a call: with automatic joining, the photo comes over and Luna describes it
+  (or gives up after about 25 seconds). In the default build a call can't wait for you to
+  join a network in Settings, so the photo stays on the glasses and Luna says so.
 - Optional, off by default: the glasses' assistant button starts a Luna call while the app
   is open on screen.
 
@@ -149,9 +154,17 @@ audio route.
 
 The app can send only these commands to the glasses: take a photo, count the media, read
 the battery, and open, confirm and close their Wi-Fi for a photo download. Restart, factory
-reset and firmware commands cannot be built. Joining the glasses' Wi-Fi needs the Hotspot
-Configuration capability (in `project.yml`); while it is joined, the iPhone is off your
-usual Wi-Fi for a few seconds.
+reset and firmware commands cannot be built. While the glasses' Wi-Fi is joined, the iPhone
+is off your usual Wi-Fi for a few seconds.
+
+**Automatic joining (paid developer accounts).** For the app to join the glasses' Wi-Fi by
+itself it needs the Hotspot Configuration entitlement, which personal (free) developer teams
+can't use, so it is off by default. With a paid team, set the build setting
+`HERMES_HOTSPOT_JOIN` to `YES` (in `project.yml` before running `xcodegen`, or on the
+`xcodebuild` command line). That one switch signs with
+`HermesLensApp/Resources/HermesLens.entitlements` (`CODE_SIGN_ENTITLEMENTS`) and compiles with
+the Swift condition `HERMES_HOTSPOT_JOIN`, which turns on automatic joining and the photo
+in a call's look. Left at `NO`, the app is signed without any entitlements file.
 
 **These glasses accept Bluetooth commands from anyone nearby, with no pairing.** Use them
 for testing, not for anything private.

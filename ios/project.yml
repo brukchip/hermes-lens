@@ -45,11 +45,6 @@ targets:
         product: MWDATCamera
       - package: MetaWearables
         product: MWDATInputs
-    entitlements:
-      path: HermesLensApp/Resources/HermesLens.entitlements
-      properties:
-        # Joining the HeyCyan glasses' own Wi-Fi to bring a photo over (NEHotspotConfiguration).
-        com.apple.developer.networking.HotspotConfiguration: true
     info:
       path: HermesLensApp/Resources/Info.plist
       properties:
@@ -102,6 +97,18 @@ targets:
         PRODUCT_MODULE_NAME: HermesLens
         PRODUCT_NAME: HermesLens
         TARGETED_DEVICE_FAMILY: 1
+        # HeyCyan glasses: the app joins the glasses' own Wi-Fi by itself only with the Hotspot
+        # Configuration entitlement, which personal (free) developer teams can't use. Off by
+        # default: the app then asks the user to join that Wi-Fi in Settings. With a paid team,
+        # set HERMES_HOTSPOT_JOIN to YES: it signs with HermesLensApp/Resources/HermesLens.entitlements
+        # and compiles with the HERMES_HOTSPOT_JOIN condition (see README.md › HeyCyan).
+        HERMES_HOTSPOT_JOIN: "NO"
+        HERMES_ENTITLEMENTS_YES: HermesLensApp/Resources/HermesLens.entitlements
+        HERMES_ENTITLEMENTS_NO: ""
+        CODE_SIGN_ENTITLEMENTS: $(HERMES_ENTITLEMENTS_$(HERMES_HOTSPOT_JOIN))
+        HERMES_HOTSPOT_CONDITION_YES: HERMES_HOTSPOT_JOIN
+        HERMES_HOTSPOT_CONDITION_NO: ""
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) $(HERMES_HOTSPOT_CONDITION_$(HERMES_HOTSPOT_JOIN))
     scheme:
       testTargets:
         - HermesLensTests

@@ -622,9 +622,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = HermesLensApp/Resources/HermesLens.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(HERMES_ENTITLEMENTS_$(HERMES_HOTSPOT_JOIN))";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				HERMES_APP_DISPLAY_NAME = Luna;
+				HERMES_ENTITLEMENTS_NO = "";
+				HERMES_ENTITLEMENTS_YES = HermesLensApp/Resources/HermesLens.entitlements;
+				HERMES_HOTSPOT_CONDITION_NO = "";
+				HERMES_HOTSPOT_CONDITION_YES = HERMES_HOTSPOT_JOIN;
+				HERMES_HOTSPOT_JOIN = NO;
 				HERMES_USES_MOCKS_BY_DEFAULT = NO;
 				INFOPLIST_FILE = HermesLensApp/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -635,6 +640,7 @@
 				PRODUCT_MODULE_NAME = HermesLens;
 				PRODUCT_NAME = HermesLens;
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) $(HERMES_HOTSPOT_CONDITION_$(HERMES_HOTSPOT_JOIN))";
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
@@ -643,9 +649,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = HermesLensApp/Resources/HermesLens.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(HERMES_ENTITLEMENTS_$(HERMES_HOTSPOT_JOIN))";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				HERMES_APP_DISPLAY_NAME = Luna;
+				HERMES_ENTITLEMENTS_NO = "";
+				HERMES_ENTITLEMENTS_YES = HermesLensApp/Resources/HermesLens.entitlements;
+				HERMES_HOTSPOT_CONDITION_NO = "";
+				HERMES_HOTSPOT_CONDITION_YES = HERMES_HOTSPOT_JOIN;
+				HERMES_HOTSPOT_JOIN = NO;
 				HERMES_USES_MOCKS_BY_DEFAULT = NO;
 				INFOPLIST_FILE = HermesLensApp/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -656,6 +667,7 @@
 				PRODUCT_MODULE_NAME = HermesLens;
 				PRODUCT_NAME = HermesLens;
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) $(HERMES_HOTSPOT_CONDITION_$(HERMES_HOTSPOT_JOIN))";
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
