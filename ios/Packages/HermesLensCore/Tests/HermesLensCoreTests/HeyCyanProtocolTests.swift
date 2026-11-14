@@ -78,10 +78,42 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
     #expect(HeyCyanFrame(command: 0x10, payload: []).encoded == [0xBC, 0x10, 0, 0, 0xFF, 0xFF])
 }
 
-@Test func onlyTakePhotoAndMediaCountCanBeBuilt() {
-    #expect(HeyCyanCommand.allCases == [.takePhoto, .mediaCount])
+@Test func onlyTheAllowlistedCommandsCanBeBuilt() {
+    #expect(HeyCyanCommand.allCases == [.takePhoto, .mediaCount, .batteryLevel])
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x01]) == .takePhoto)
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x04]) == .mediaCount)
+    #expect(HeyCyanCommand(command: 0x42, payload: [0x00, 0x00]) == .batteryLevel)
+}
+
+// MARK: Battery request
+
+@Test func theBatteryRequestIsCommand0x42WithTwoZeroBytes() {
+    // 0xBC, 0x42, length 2, CRC-16/MODBUS of `00 00` (0xB001, little-endian), payload.
+    #expect(HeyCyanCommand.batteryLevel.bytes == hex("bc42020001b00000"))
+    #expect(CRC16Modbus.checksum([0x00, 0x00]) == 0xB001)
+    #expect(HeyCyanCommand.batteryLevel.label == "battery_level")
+}
+
+@Test func theBatteryReplyCarriesPercentAndCharging() {
+    var parser = HeyCyanFrameParser()
+    let charging = HeyCyanFrame(command: 0x42, payload: [0x57, 0x01]).encoded
+    let notCharging = HeyCyanFrame(command: 0x42, payload: [0x3C, 0x00]).encoded
+    let percentOnly = HeyCyanFrame(command: 0x42, payload: [0x64]).encoded
+    let tooHigh = HeyCyanFrame(command: 0x42, payload: [0xC8, 0x00]).encoded
+    let empty = HeyCyanFrame(command: 0x42, payload: []).encoded
+    #expect(parser.push(charging + notCharging + percentOnly + tooHigh + empty).map(HeyCyanEvent.init) == [
+        .batteryReply(percent: 87, charging: true),
+        .batteryReply(percent: 60, charging: false),
+        .batteryReply(percent: 100, charging: false),
+        .batteryReply(percent: 100, charging: false),
+        .unknown(command: 0x42, byteCount: 0),
+    ])
+    // The reply's percent and charging bytes are frame bytes 6 and 7.
+    #expect(charging[6] == 0x57 && charging[7] == 0x01)
+}
+
+@Test func theBatteryEventStillDecodesBesideTheReply() {
+    #expect(decode("bc7303004931056300") == .battery(percent: 99))
 }
 
 @Test func dangerousCommandsCannotBeBuilt() {
@@ -115,6 +147,8 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
     }
     // takePhoto is reached twice ([2,1,x] and [x,1,1] with x = 1/2), mediaCount once.
     #expect(Set(accepted.map(\.label)) == ["take_photo", "media_count"])
+    #expect(HeyCyanCommand(command: 0x42, payload: [0x00]) == nil)
+    #expect(HeyCyanCommand(command: 0x42, payload: [0x00, 0x01]) == nil)
     #expect(accepted.filter { $0 == .mediaCount }.count == 1)
 }
 

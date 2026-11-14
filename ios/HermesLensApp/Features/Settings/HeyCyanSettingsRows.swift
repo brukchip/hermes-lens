@@ -31,7 +31,9 @@ struct HeyCyanSettingsRows: View {
             .accessibilityIdentifier("settings.heycyan.status")
 
             if glasses.isConnected {
-                LabeledContent("Battery", value: glasses.batteryPercent.map { "\($0)%" } ?? "Waiting for the glasses")
+                LabeledContent("Battery", value: glasses.batteryPercent.map {
+                    glasses.batteryCharging == true ? "\($0)% · Charging" : "\($0)%"
+                } ?? "Waiting for the glasses")
                     .accessibilityIdentifier("settings.heycyan.battery")
                 Button(isTakingTestPhoto ? "Taking a photo…" : "Take a test photo") {
                     Task { await takeTestPhoto() }

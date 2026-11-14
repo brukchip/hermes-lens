@@ -2,13 +2,14 @@ import CoreBluetooth
 import Foundation
 import HermesLensCore
 import Observation
+import UIKit
 
 /// HeyCyan camera glasses (AM01 family: L802, M01) over Bluetooth LE, beta.
 ///
 /// The glasses do not advertise their services, so a scan lists every named device (`M01…`,
 /// `L 802…` names first) and the user picks one. Once connected, the app subscribes to the
 /// big-data channel and can only send the allowlisted `HeyCyanCommand`s: take a photo (it is
-/// stored on the glasses) and count the media on the glasses.
+/// stored on the glasses), count the media on the glasses and ask for the battery level.
 ///
 /// Foreground only: nothing here scans or reconnects in the background, and there is no state
 /// restoration. The app reconnects to the remembered glasses when it becomes active.
@@ -54,8 +55,12 @@ final class HeyCyanGlassesService: NSObject {
     private(set) var state: LinkState = .disconnected
     private(set) var isScanning = false
     private(set) var found: [FoundDevice] = []
-    /// Percent, as the glasses last reported it (they send it every so often, not on request).
+    /// Percent, from the battery request (on connect, then every minute in the foreground) or
+    /// the glasses' own occasional report. Nil when the glasses did not answer and the last
+    /// value is too old to show.
     private(set) var batteryPercent: Int?
+    /// Whether the glasses are charging, when the battery request answered.
+    private(set) var batteryCharging: Bool?
     private(set) var connectedID: UUID?
     private(set) var connectedName: String?
     private(set) var isTakingPhoto = false
@@ -64,6 +69,10 @@ final class HeyCyanGlassesService: NSObject {
     static let scanSeconds: Double = 15
     static let connectTimeout: Duration = .seconds(15)
     static let replyTimeout: Duration = .seconds(3)
+    static let batteryPollInterval: Duration = .seconds(60)
+    static let batteryReplyTimeout: Duration = .seconds(5)
+    /// A battery value older than this is not shown when a request goes unanswered.
+    static let batteryStaleSeconds: TimeInterval = 90
     private static let maximumListed = 30
 
     @ObservationIgnored private var central: CBCentralManager?
@@ -78,6 +87,11 @@ final class HeyCyanGlassesService: NSObject {
     @ObservationIgnored private var buttonListeners: [UUID: AsyncStream<Void>.Continuation] = [:]
     @ObservationIgnored private var audioFrames = 0
     @ObservationIgnored private var buttonFilter = HeyCyanAssistantButtonFilter()
+    @ObservationIgnored private var batteryPoll: Task<Void, Never>?
+    @ObservationIgnored private var batteryUpdatedAt: Date?
+    @ObservationIgnored private var batteryRequestedAt: Date?
+    @ObservationIgnored private var batteryReplyTraced = false
+    @ObservationIgnored private var batteryNoReplyTraced = false
 
     private let serviceUUID = CBUUID(string: HeyCyanUUID.bigDataService)
     private let notifyUUID = CBUUID(string: HeyCyanUUID.bigDataNotify)
@@ -151,8 +165,15 @@ final class HeyCyanGlassesService: NSObject {
         connectedName = target.name ?? found.first { $0.id == id }?.name
     }
 
-    /// Back in the foreground: reconnects to the remembered glasses, quietly.
+    /// Back in the foreground: reconnects to the remembered glasses, quietly, or refreshes the
+    /// battery when they are still connected.
     func reconnect(to id: UUID?) {
+        if isConnected {
+            if batteryRequestedAt.map({ Date.now.timeIntervalSince($0) >= 60 }) ?? true {
+                Task { await refreshBattery() }
+            }
+            return
+        }
         guard let id, state == .disconnected, CBManager.authorization == .allowedAlways else { return }
         Task { try? await connect(to: id) }
     }
@@ -201,6 +222,40 @@ final class HeyCyanGlassesService: NSObject {
         return result
     }
 
+    /// Asks the glasses for their battery level (only while connected and Luna is on screen).
+    /// The reply arrives as a 0x42 frame; with no answer within `batteryReplyTimeout`, a value
+    /// older than `batteryStaleSeconds` is cleared rather than shown stale.
+    func refreshBattery() async {
+        guard isConnected, UIApplication.shared.applicationState == .active else { return }
+        let asked = Date.now
+        batteryRequestedAt = asked
+        do { try send(.batteryLevel) } catch { return }
+        try? await Task.sleep(for: Self.batteryReplyTimeout)
+        guard !Task.isCancelled, isConnected else { return }
+        if let updated = batteryUpdatedAt, updated >= asked { return }
+        if !batteryNoReplyTraced {
+            batteryNoReplyTraced = true
+            trace("heycyan.battery", "result=no_reply")
+        }
+        if batteryUpdatedAt.map({ Date.now.timeIntervalSince($0) > Self.batteryStaleSeconds }) ?? true {
+            batteryPercent = nil
+            batteryCharging = nil
+        }
+    }
+
+    /// Right after connecting, then every `batteryPollInterval` while connected.
+    private func startBatteryPoll() {
+        batteryPoll?.cancel()
+        batteryReplyTraced = false
+        batteryNoReplyTraced = false
+        batteryPoll = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshBattery()
+                try? await Task.sleep(for: Self.batteryPollInterval)
+            }
+        }
+    }
+
     /// One element for every press of the assistant button (the glasses report "mic started"),
     /// for as long as the caller iterates. A mic start within 10 s of the app's own photo
     /// command is left out (`HeyCyanAssistantButtonFilter`).
@@ -221,7 +276,8 @@ final class HeyCyanGlassesService: NSObject {
         let type: CBCharacteristicWriteType = writeCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
         if command == .takePhoto { buttonFilter.photoCommandSent(at: .now) }
         peripheral.writeValue(Data(command.bytes), for: writeCharacteristic, type: type)
-        trace("heycyan.send", command.label)
+        // The minute-by-minute battery request is traced by its result instead.
+        if command != .batteryLevel { trace("heycyan.send", command.label) }
     }
 
     private func ensureCentral() -> CBCentralManager {
@@ -272,12 +328,15 @@ final class HeyCyanGlassesService: NSObject {
         trace("heycyan.connect", "ok")
         connectWaiter?.resume()
         connectWaiter = nil
+        startBatteryPoll()
     }
 
     /// Closes the link (if any) and clears everything learned over it.
     private func dropLink() {
         connectDeadline?.cancel()
         connectDeadline = nil
+        batteryPoll?.cancel()
+        batteryPoll = nil
         if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         peripheral?.delegate = nil
         peripheral = nil
@@ -287,6 +346,9 @@ final class HeyCyanGlassesService: NSObject {
         connectedID = nil
         connectedName = nil
         batteryPercent = nil
+        batteryCharging = nil
+        batteryUpdatedAt = nil
+        batteryRequestedAt = nil
         let waiters = countWaiters
         countWaiters.removeAll()
         for waiter in waiters.values { waiter.resume(throwing: HeyCyanError.notConnected) }
@@ -299,6 +361,21 @@ final class HeyCyanGlassesService: NSObject {
         case .battery(let percent):
             if batteryPercent.map({ $0 / 10 }) != percent / 10 { trace("heycyan.battery", "level=\(percent / 10 * 10)") }
             batteryPercent = percent
+            batteryUpdatedAt = .now
+        case .batteryReply(let percent, let charging):
+            // Glasses at 0 % cannot answer: a zero that is not charging is not a real level.
+            guard percent > 0 || charging else {
+                trace("heycyan.battery", "result=zero_ignored")
+                return
+            }
+            if !batteryReplyTraced {
+                batteryReplyTraced = true
+                trace("heycyan.battery", "result=ok source=request")
+            }
+            if batteryPercent.map({ $0 / 10 }) != percent / 10 { trace("heycyan.battery", "level=\(percent / 10 * 10)") }
+            batteryPercent = percent
+            batteryCharging = charging
+            batteryUpdatedAt = .now
         case .micStarted:
             audioFrames = 0
             // A photo also starts the glasses' own listening (seen on the M01): not a button press.

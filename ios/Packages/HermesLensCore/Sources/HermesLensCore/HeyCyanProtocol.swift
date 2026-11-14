@@ -129,12 +129,17 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
     case takePhoto
     /// Glasses control: how many photos, videos and recordings are on the glasses.
     case mediaCount
+    /// Battery level and charging state (read-only). The glasses also report the level on their
+    /// own now and then (event 0x73, type 0x05), but too rarely to show it reliably.
+    case batteryLevel
 
     static let glassesControl: UInt8 = 0x41
+    static let syncBattery: UInt8 = 0x42
 
     var command: UInt8 {
         switch self {
         case .takePhoto, .mediaCount: Self.glassesControl
+        case .batteryLevel: Self.syncBattery
         }
     }
 
@@ -142,6 +147,7 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         switch self {
         case .takePhoto: [0x02, 0x01, 0x01]
         case .mediaCount: [0x02, 0x04]
+        case .batteryLevel: [0x00, 0x00]
         }
     }
 
@@ -161,6 +167,7 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         switch self {
         case .takePhoto: "take_photo"
         case .mediaCount: "media_count"
+        case .batteryLevel: "battery_level"
         }
     }
 }
@@ -182,6 +189,8 @@ public struct HeyCyanMediaCount: Equatable, Sendable {
 public enum HeyCyanEvent: Equatable, Sendable {
     /// Battery level in percent (event 0x73, type 0x05).
     case battery(percent: Int)
+    /// Reply to `HeyCyanCommand.batteryLevel` (0x42): `[percent, charging 1/0]`.
+    case batteryReply(percent: Int, charging: Bool)
     /// The glasses' microphone started: the assistant button (event 0x73, type 0x03).
     case micStarted
     /// The microphone stopped (event 0x73, type 0x0A).
@@ -223,6 +232,9 @@ public enum HeyCyanEvent: Equatable, Sendable {
             }
         case Self.micAudioCommand:
             self = .micAudio(byteCount: p.count)
+        case HeyCyanCommand.syncBattery:
+            guard let percent = p.first else { self = .unknown(command: frame.command, byteCount: 0); return }
+            self = .batteryReply(percent: min(100, Int(percent)), charging: p.count >= 2 && p[1] == 1)
         case HeyCyanCommand.glassesControl:
             if p.count >= 8, p[0] == 0x02, p[1] == 0x04 {
                 func le16(_ i: Int) -> Int { Int(p[i]) | Int(p[i + 1]) << 8 }
