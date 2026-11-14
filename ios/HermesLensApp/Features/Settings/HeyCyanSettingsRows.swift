@@ -124,9 +124,9 @@ struct HeyCyanSettingsRows: View {
     private func takeTestPhoto() async {
         isTakingTestPhoto = true
         testPhotoMessage = nil
-        let outcome = await model.takeHeyCyanPhoto()
+        let outcome = await model.takeHeyCyanPhoto(fetch: false)
         testPhotoMessage = switch outcome {
-        case .keptOnGlasses(let count): "Photo taken. The glasses now hold \(count) photo\(count == 1 ? "" : "s")."
+        case .keptOnGlasses(let count, _): "Photo taken. The glasses now hold \(count) photo\(count == 1 ? "" : "s")."
         default: outcome.message
         }
         isTakingTestPhoto = false

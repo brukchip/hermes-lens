@@ -719,9 +719,10 @@ final class LunaNativeSession {
             case "glasses_not_worn": "The user is not wearing the glasses right now. Ask them to put them on, then look again."
             case "glasses_folded": "The user's glasses are folded. Ask them to open and wear them, then look again."
             case "glasses_too_hot": "The glasses are too hot to use the camera. Tell the user to give them a few minutes; do not retry now."
-            case "heycyan_photo_on_glasses": "A photo was taken with the user's HeyCyan glasses and saved on the glasses, but this version of Luna can't bring it to the phone yet, so no image is attached. Tell them in one short sentence; never guess what is in it, and do not retry."
-            case "heycyan_photo_unconfirmed": "The user's HeyCyan glasses did not confirm a new photo, and this version of Luna can't see their photos anyway. Tell them briefly; never guess what is in front of them."
-            case "heycyan_not_connected": "The user's HeyCyan glasses are not connected. Ask them to connect them in the You tab. Even then, this version of Luna can't see their photos yet."
+            case "heycyan_photo_not_transferred": "A photo was taken with the user's HeyCyan glasses and is saved on the glasses, but it could not be brought to the phone, so no image is attached. Tell them in one short sentence; never guess what is in it. Do not retry unless they ask."
+            case "heycyan_photo_unconfirmed": "The user's HeyCyan glasses did not confirm a new photo, so no image is attached. Tell them briefly; never guess what is in front of them."
+            case "heycyan_not_connected": "The user's HeyCyan glasses are not connected. Ask them to connect them in the You tab, then try again."
+            case "heycyan_busy": "The user's HeyCyan glasses are still bringing an earlier photo to the phone, so no image is attached. Tell them briefly and offer to look again in a moment; never guess."
             case "heycyan_no_video": "The user's HeyCyan glasses can't record video for Luna yet. Tell them briefly; do not retry."
             default: "The glasses camera could not do that. Check that the glasses are on, connected and unfolded."
             }

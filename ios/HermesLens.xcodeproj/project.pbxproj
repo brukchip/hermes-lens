@@ -17,6 +17,7 @@
 		30414C1EB5E100B7DC1CB0D2 /* VisualCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7BF2C1C3E940CA0BDFB6D1C /* VisualCaptureView.swift */; };
 		396B095A32087ABA4543D525 /* LunaTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71E8584764314BE2BD7A545D /* LunaTabBar.swift */; };
 		3A2A69347ABD745BBA2711B6 /* GlassesDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D835CB5298C0A470F5F7EC4 /* GlassesDevice.swift */; };
+		41CE5A15725693D96F397ED4 /* HeyCyanPhotoTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 816EAA142A283F73098A4435 /* HeyCyanPhotoTransfer.swift */; };
 		4B02D57F3DEF3BD8C0F79787 /* V3HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747C76D0D84325DADB9E9391 /* V3HomeView.swift */; };
 		6E8EC720783260CEE7A6F494 /* AppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D304E09ACD6161AF74919620 /* AppModelTests.swift */; };
 		7139F283CDA78CE6EBADA077 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */; };
@@ -91,6 +92,7 @@
 		29A188FB28EFCF18A523C93E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3862CDA35DE0371F81DD0AD3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		3B89CDE0F37BA3023B69172E /* HermesLens.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HermesLens.entitlements; sourceTree = "<group>"; };
 		444D69CC9D511AE71B18D935 /* CallRecordStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecordStore.swift; sourceTree = "<group>"; };
 		491C3AA044C0367FA4DC2ED6 /* HeyCyanGlassesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeyCyanGlassesService.swift; sourceTree = "<group>"; };
 		502008C0CBA16BD12EFB0B69 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
@@ -107,6 +109,7 @@
 		747C76D0D84325DADB9E9391 /* V3HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V3HomeView.swift; sourceTree = "<group>"; };
 		7D71DCC032CAC8A7ED3BAE86 /* AudioDiagnosticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDiagnosticService.swift; sourceTree = "<group>"; };
 		7E181D968FDC52131853E154 /* VoiceDiagnosticLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceDiagnosticLog.swift; sourceTree = "<group>"; };
+		816EAA142A283F73098A4435 /* HeyCyanPhotoTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeyCyanPhotoTransfer.swift; sourceTree = "<group>"; };
 		83B987FD1DA15BF357D5FB3D /* LunaIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaIntents.swift; sourceTree = "<group>"; };
 		83FB99DCA75FC5EEC9E4422E /* HermesLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesLensApp.swift; sourceTree = "<group>"; };
 		8D82FE3148935B9FA36581D7 /* HermesLensUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HermesLensUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -257,6 +260,7 @@
 				0B491815DFACD2EE11C795E8 /* GlassesFrameDecoder.swift */,
 				AFF6CB4A818EF5AC2096FD54 /* GlassesService.swift */,
 				491C3AA044C0367FA4DC2ED6 /* HeyCyanGlassesService.swift */,
+				816EAA142A283F73098A4435 /* HeyCyanPhotoTransfer.swift */,
 				6143E0F284A8C7AEF28879E4 /* LunaCall.swift */,
 				97A6A210FD95373BB8753D26 /* LunaNativeSession.swift */,
 				0E481546E565AA235E3F8BB3 /* MockHermesClient.swift */,
@@ -299,6 +303,7 @@
 			isa = PBXGroup;
 			children = (
 				9C6AF3473C699284A4C0316F /* Assets.xcassets */,
+				3B89CDE0F37BA3023B69172E /* HermesLens.entitlements */,
 				29A188FB28EFCF18A523C93E /* Info.plist */,
 				367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */,
 			);
@@ -511,6 +516,7 @@
 				F97D25B6A731FD76DF27DEFA /* GlassesService.swift in Sources */,
 				2603D11B29BA31BB59CFC08D /* HermesLensApp.swift in Sources */,
 				D63B49707625548CD8EBF2FA /* HeyCyanGlassesService.swift in Sources */,
+				41CE5A15725693D96F397ED4 /* HeyCyanPhotoTransfer.swift in Sources */,
 				D548FAF2CCE14B5D9588CA9E /* HeyCyanSettingsRows.swift in Sources */,
 				8619DAE3D7E789CC08D6D207 /* LibraryFeed.swift in Sources */,
 				B34E24479686DCC9996BBA1C /* LibraryView.swift in Sources */,
@@ -612,6 +618,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = HermesLensApp/Resources/HermesLens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				HERMES_APP_DISPLAY_NAME = Luna;
 				HERMES_USES_MOCKS_BY_DEFAULT = NO;
@@ -632,6 +639,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = HermesLensApp/Resources/HermesLens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				HERMES_APP_DISPLAY_NAME = Luna;
 				HERMES_USES_MOCKS_BY_DEFAULT = NO;

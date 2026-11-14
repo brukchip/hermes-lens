@@ -9,13 +9,15 @@ import UIKit
 /// The glasses do not advertise their services, so a scan lists every named device (`M01…`,
 /// `L 802…` names first) and the user picks one. Once connected, the app subscribes to the
 /// big-data channel and can only send the allowlisted `HeyCyanCommand`s: take a photo (it is
-/// stored on the glasses), count the media on the glasses and ask for the battery level.
+/// stored on the glasses), count the media on the glasses, ask for the battery level, and open
+/// and close the glasses' own Wi-Fi for one photo download (`HeyCyanPhotoTransfer`).
 ///
 /// Foreground only: nothing here scans or reconnects in the background, and there is no state
 /// restoration. The app reconnects to the remembered glasses when it becomes active.
 ///
 /// Privacy: trace lines carry states, commands and counts only. Device names, identifiers,
-/// addresses, audio frames and photo bytes are never logged.
+/// Bluetooth addresses, Wi-Fi names and passwords, audio frames and photo bytes are never
+/// logged. The glasses' private Wi-Fi IP address during a transfer is logged.
 @MainActor
 @Observable
 final class HeyCyanGlassesService: NSObject {
@@ -92,6 +94,10 @@ final class HeyCyanGlassesService: NSObject {
     @ObservationIgnored private var batteryRequestedAt: Date?
     @ObservationIgnored private var batteryReplyTraced = false
     @ObservationIgnored private var batteryNoReplyTraced = false
+    @ObservationIgnored private var credentialWaiters: [UUID: CheckedContinuation<HeyCyanWiFiCredentials, Error>] = [:]
+    @ObservationIgnored private var addressWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
+    /// The Wi-Fi address the glasses reported since the last `enterTransferMode` (event 0x73/08).
+    @ObservationIgnored private(set) var reportedWiFiAddress: String?
 
     private let serviceUUID = CBUUID(string: HeyCyanUUID.bigDataService)
     private let notifyUUID = CBUUID(string: HeyCyanUUID.bigDataNotify)
@@ -243,6 +249,47 @@ final class HeyCyanGlassesService: NSObject {
         }
     }
 
+    // MARK: Transfer mode (the glasses' own Wi-Fi, for one photo download)
+
+    /// Asks the glasses to open their Wi-Fi and returns its name and password. Throws
+    /// `timedOut` when no reply comes, `transferRefused` when the reply has no credentials.
+    func enterTransferMode(timeout: Duration) async throws -> HeyCyanWiFiCredentials {
+        reportedWiFiAddress = nil
+        let id = UUID()
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HeyCyanWiFiCredentials, Error>) in
+            do { try send(.enterTransferMode) } catch { continuation.resume(throwing: error); return }
+            credentialWaiters[id] = continuation
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                self?.credentialWaiters.removeValue(forKey: id)?.resume(throwing: HeyCyanError.timedOut)
+            }
+        }
+    }
+
+    /// The "proceed" some firmware waits for before it reports its Wi-Fi address.
+    func sendTransferProceed() throws {
+        try send(.transferProceed)
+    }
+
+    /// Closes the glasses' Wi-Fi. Never throws: it runs on every path after a transfer attempt.
+    func exitTransferMode() {
+        do { try send(.exitTransferMode) } catch { trace("heycyan.transfer", "event=exit_not_sent reason=not_connected") }
+    }
+
+    /// The glasses' Wi-Fi address, once they report it, or nil after `timeout`.
+    func waitForWiFiAddress(timeout: Duration) async -> String? {
+        if let reportedWiFiAddress { return reportedWiFiAddress }
+        guard isConnected else { return nil }
+        let id = UUID()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            addressWaiters[id] = continuation
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                self?.addressWaiters.removeValue(forKey: id)?.resume(returning: nil)
+            }
+        }
+    }
+
     /// Right after connecting, then every `batteryPollInterval` while connected.
     private func startBatteryPoll() {
         batteryPoll?.cancel()
@@ -352,6 +399,13 @@ final class HeyCyanGlassesService: NSObject {
         let waiters = countWaiters
         countWaiters.removeAll()
         for waiter in waiters.values { waiter.resume(throwing: HeyCyanError.notConnected) }
+        let credentials = credentialWaiters
+        credentialWaiters.removeAll()
+        for waiter in credentials.values { waiter.resume(throwing: HeyCyanError.notConnected) }
+        let addresses = addressWaiters
+        addressWaiters.removeAll()
+        for waiter in addresses.values { waiter.resume(returning: nil) }
+        reportedWiFiAddress = nil
         connectWaiter?.resume(throwing: HeyCyanError.notConnected)
         connectWaiter = nil
     }
@@ -393,10 +447,31 @@ final class HeyCyanGlassesService: NSObject {
             for waiter in waiters.values { waiter.resume(returning: count) }
         case .photoReply:
             trace("heycyan.event", "photo_reply")
-        case .volume, .state, .otherEvent, .controlReply, .unknown,
-             .transferCredentials, .transferModeReply, .transferProceedEcho, .exitTransferReply,
-             .wifiAddress, .wifiError:
-            break  // the transfer events are used from the next commit on
+        case .transferCredentials(let credentials):
+            // Never the name or password: only that they arrived.
+            trace("heycyan.transfer", "event=credentials has_password=\(!credentials.password.isEmpty) waiting=\(credentialWaiters.count)")
+            let waiters = credentialWaiters
+            credentialWaiters.removeAll()
+            for waiter in waiters.values { waiter.resume(returning: credentials) }
+        case .transferModeReply(let byteCount):
+            trace("heycyan.transfer", "event=mode_reply_without_credentials bytes=\(byteCount)")
+            let waiters = credentialWaiters
+            credentialWaiters.removeAll()
+            for waiter in waiters.values { waiter.resume(throwing: HeyCyanError.transferRefused) }
+        case .transferProceedEcho:
+            trace("heycyan.transfer", "event=proceed_echo")
+        case .exitTransferReply:
+            trace("heycyan.transfer", "event=exit_reply")
+        case .wifiAddress(let address):
+            trace("heycyan.transfer", "event=wifi_address ip=\(address)")
+            reportedWiFiAddress = address
+            let waiters = addressWaiters
+            addressWaiters.removeAll()
+            for waiter in waiters.values { waiter.resume(returning: address) }
+        case .wifiError(let code):
+            trace("heycyan.transfer", "event=wifi_error code=\(code)")
+        case .volume, .state, .otherEvent, .controlReply, .unknown:
+            break
         }
     }
 
@@ -515,6 +590,8 @@ enum HeyCyanError: Error, LocalizedError, Equatable {
     case notConnected
     case timedOut
     case busy
+    /// The glasses answered the transfer-mode request without a Wi-Fi name and password.
+    case transferRefused
 
     var errorDescription: String? {
         switch self {
@@ -525,6 +602,7 @@ enum HeyCyanError: Error, LocalizedError, Equatable {
         case .notConnected: "The HeyCyan glasses aren't connected."
         case .timedOut: "The glasses didn't answer in time. Make sure they're on and close by."
         case .busy: "The glasses are busy. Try again in a moment."
+        case .transferRefused: "The glasses didn't open their Wi-Fi for the photo."
         }
     }
 
@@ -537,6 +615,7 @@ enum HeyCyanError: Error, LocalizedError, Equatable {
         case .notConnected: "not_connected"
         case .timedOut: "timeout"
         case .busy: "busy"
+        case .transferRefused: "transfer_refused"
         }
     }
 }

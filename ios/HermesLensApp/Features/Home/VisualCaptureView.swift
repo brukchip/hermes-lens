@@ -312,7 +312,11 @@ struct VisualCaptureView: View {
             kind == .video
                 ? "A short clip straight from your glasses."
                 : "One photo, saved on this iPhone first."
-        case .capturing: "Keep the glasses on and pointed at it."
+        case .capturing:
+            // HeyCyan: the photo comes over the glasses' Wi-Fi, in visible steps.
+            model.glassesBrand == .heyCyan
+                ? model.heyCyanTransfer.stage?.displayText ?? "Keep the glasses on and pointed at it."
+                : "Keep the glasses on and pointed at it."
         case .complete: "It's in your Library on this iPhone."
         case .captureFailed:
             model.lastCaptureKeptOnGlasses ? "Nothing was added to this iPhone yet." : "Nothing was saved or sent."

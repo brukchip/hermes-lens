@@ -55,9 +55,11 @@ final class AppModel {
     private var glassesService: any GlassesService
     /// HeyCyan camera glasses (beta). Idle, with no Bluetooth manager or permission prompt,
     /// until the user picks HeyCyan in Settings.
-    let heyCyan = HeyCyanGlassesService()
+    let heyCyan: HeyCyanGlassesService
+    /// Takes a HeyCyan photo and brings it over the glasses' Wi-Fi, one at a time.
+    let heyCyanTransfer: HeyCyanPhotoTransfer
     @ObservationIgnored private var heyCyanButtonTask: Task<Void, Never>?
-    /// The last Photo flow photo was taken but stays on the glasses (HeyCyan step 1).
+    /// The last Photo flow photo was taken but could not be brought from the glasses.
     private(set) var lastCaptureKeptOnGlasses = false
 
     init(
@@ -70,6 +72,9 @@ final class AppModel {
         self.notifications = notifications
         hermesClient = MockHermesClient()
         glassesService = MockGlassesService()
+        let heyCyan = HeyCyanGlassesService()
+        self.heyCyan = heyCyan
+        heyCyanTransfer = HeyCyanPhotoTransfer(glasses: heyCyan)
     }
 
     func bootstrap() async {
@@ -295,9 +300,14 @@ final class AppModel {
     /// never started gets no wait at all.
     func captureCallFrame() async throws -> Data {
         if glassesBrand == .heyCyan {
-            // The photo is taken, but it stays on the glasses in this version: Luna is told so
-            // (by the error's code) instead of being given an image.
-            throw LunaCameraError(code: await takeHeyCyanPhoto().lookCode)
+            // A photo on the glasses, brought over their Wi-Fi within the call's look budget.
+            // When it cannot be brought over, Luna is told why (by the error's code) instead of
+            // being given an image.
+            let outcome = await takeHeyCyanPhoto(fetch: true, budget: HeyCyanPhotoTransfer.callBudget)
+            guard case .fetched(let jpeg, _) = outcome else { throw LunaCameraError(code: outcome.lookCode) }
+            VoiceDiagnosticLog.record("glasses.call_frame", "source=heycyan \(Self.imageShape(jpeg))")
+            _ = try? await beginArtifact(data: jpeg, kind: .photo, request: "Photo from a Luna call")
+            return jpeg
         }
         let held = await holdGlassesCameraForCall()
         do {
@@ -477,7 +487,7 @@ final class AppModel {
         request: String
     ) async -> CaptureArtifact? {
         lastCaptureKeptOnGlasses = false
-        if glassesBrand == .heyCyan { return await captureOnHeyCyan(kind) }
+        if glassesBrand == .heyCyan { return await captureOnHeyCyan(kind, request: request) }
         isWorking = true
         glassesIdleRelease?.cancel()
         defer {
@@ -768,7 +778,7 @@ final class AppModel {
             GlassesStatus(brand: .heyCyan,
                           name: heyCyan.connectedName ?? settings.heyCyanPeripheralName ?? "HeyCyan glasses",
                           isConnected: heyCyan.isConnected, battery: heyCyan.batteryPercent,
-                          photosReachPhone: false)
+                          photosReachPhone: true)
         }
     }
 
@@ -839,25 +849,24 @@ final class AppModel {
         heyCyanProblem = nil
     }
 
-    /// Takes one photo on the HeyCyan glasses, reconnecting first if they were remembered.
-    func takeHeyCyanPhoto() async -> HeyCyanPhotoOutcome {
+    /// Takes one photo on the HeyCyan glasses, reconnecting first if they were remembered, and
+    /// with `fetch` brings it to this iPhone. Everything, the reconnect included, fits `budget`.
+    /// A second request while one runs is refused (`busy`).
+    func takeHeyCyanPhoto(fetch: Bool, budget: Duration = HeyCyanPhotoTransfer.interactiveBudget) async -> HeyCyanPhotoOutcome {
+        guard !heyCyanTransfer.isBusy else { return .busy }
+        let clock = ContinuousClock()
+        let started = clock.now
         if !heyCyan.isConnected, let id = settings.heyCyanPeripheralID {
             try? await heyCyan.connect(to: id)
         }
         guard heyCyan.isConnected else { return .notConnected }
-        do {
-            let result = try await heyCyan.takePhoto()
-            return result.confirmed ? .keptOnGlasses(photosOnGlasses: result.after.photos) : .unconfirmed
-        } catch HeyCyanError.notConnected {
-            return .notConnected
-        } catch {
-            return .failed(error.localizedDescription)
-        }
+        return await heyCyanTransfer.takePhoto(fetch: fetch, budget: budget - (clock.now - started))
     }
 
-    /// The Photo and Video flows with HeyCyan glasses: a photo is taken but stays on the glasses,
-    /// so nothing is added to the Library; video is not available yet.
-    private func captureOnHeyCyan(_ kind: VisualCaptureKind) async -> CaptureArtifact? {
+    /// The Photo and Video flows with HeyCyan glasses: the photo is taken on the glasses, brought
+    /// over their Wi-Fi and saved on this iPhone first, like a Meta photo. When it cannot be
+    /// brought over, nothing is added to the Library and the reason is shown. No video yet.
+    private func captureOnHeyCyan(_ kind: VisualCaptureKind, request: String) async -> CaptureArtifact? {
         lastCaptureError = nil
         guard kind == .photo else {
             lastCaptureError = "HeyCyan glasses can't record video for Luna yet."
@@ -865,9 +874,23 @@ final class AppModel {
         }
         isWorking = true
         defer { isWorking = false }
-        let outcome = await takeHeyCyanPhoto()
-        if case .keptOnGlasses = outcome { lastCaptureKeptOnGlasses = true }
-        lastCaptureError = outcome.message
+        let outcome = await takeHeyCyanPhoto(fetch: true)
+        switch outcome {
+        case .fetched(let jpeg, _):
+            VoiceDiagnosticLog.record("glasses.photo", "source=heycyan \(Self.imageShape(jpeg))")
+            do {
+                let id = try await beginArtifact(data: jpeg, kind: .photo, request: request)
+                return artifacts.first { $0.id == id }
+            } catch {
+                lastCaptureError = error.localizedDescription
+                return nil
+            }
+        case .keptOnGlasses:
+            lastCaptureKeptOnGlasses = true
+            lastCaptureError = outcome.message
+        default:
+            lastCaptureError = outcome.message
+        }
         return nil
     }
 

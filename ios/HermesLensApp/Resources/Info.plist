@@ -72,7 +72,7 @@
 	<key>NSContactsUsageDescription</key>
 	<string>Luna fills in a new contact from a business card; you check it and tap Done to save it.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Luna uses a private local connection to receive photos and video from your Meta glasses.</string>
+	<string>Luna uses a private local connection to receive photos and video from your glasses.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Luna listens only while you are talking to her, after you tap Talk to Luna.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
