@@ -79,10 +79,15 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
 }
 
 @Test func onlyTheAllowlistedCommandsCanBeBuilt() {
-    #expect(HeyCyanCommand.allCases == [.takePhoto, .mediaCount, .batteryLevel])
+    #expect(HeyCyanCommand.allCases == [
+        .takePhoto, .mediaCount, .batteryLevel, .enterTransferMode, .transferProceed, .exitTransferMode,
+    ])
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x01]) == .takePhoto)
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x04]) == .mediaCount)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00, 0x00]) == .batteryLevel)
+    #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x04]) == .enterTransferMode)
+    #expect(HeyCyanCommand(command: 0x45, payload: [0x04, 0x01]) == .transferProceed)
+    #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x09]) == .exitTransferMode)
 }
 
 // MARK: Battery request
@@ -121,8 +126,7 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
         [0x02, 0x01, 0x0A],  // factory reset
         [0x02, 0x01, 0x0E],  // restart
         [0x02, 0x01, 0x05],  // OTA mode
-        [0x02, 0x01, 0x04],  // Wi-Fi transfer mode (step 2, not now)
-        [0x02, 0x01, 0x09],  // leave transfer mode
+        [0x02, 0x01, 0x0F],  // reset the glasses' Wi-Fi Direct
     ]
     for payload in forbidden {
         #expect(HeyCyanCommand(command: 0x41, payload: payload) == nil)
@@ -145,10 +149,15 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
             }
         }
     }
-    // takePhoto is reached twice ([2,1,x] and [x,1,1] with x = 1/2), mediaCount once.
-    #expect(Set(accepted.map(\.label)) == ["take_photo", "media_count"])
+    // takePhoto is reached twice ([2,1,x] and [x,1,1] with x = 1/2), mediaCount once, and the
+    // transfer mode's enter and exit once each ([2,1,4] and [2,1,9]).
+    #expect(Set(accepted.map(\.label)) == ["take_photo", "media_count", "enter_transfer_mode", "exit_transfer_mode"])
+    #expect(accepted.filter { $0 == .enterTransferMode }.count == 1)
+    #expect(accepted.filter { $0 == .exitTransferMode }.count == 1)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00]) == nil)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00, 0x01]) == nil)
+    #expect(HeyCyanCommand(command: 0x45, payload: [0x04, 0x00]) == nil)
+    #expect(HeyCyanCommand(command: 0x45, payload: [0x04, 0x01, 0x00]) == nil)
     #expect(accepted.filter { $0 == .mediaCount }.count == 1)
 }
 
@@ -306,4 +315,124 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
     filter.photoCommandSent(at: first.addingTimeInterval(8))
     #expect(!filter.isButtonPress(micStartedAt: first.addingTimeInterval(12)))
     #expect(filter.isButtonPress(micStartedAt: first.addingTimeInterval(18)))
+}
+
+// MARK: Transfer mode (documented by the community; not yet tried on hardware)
+
+/// A transfer-mode reply as documented: `02 01 04 01 <name len> <password len> <name> <password>`.
+private func transferReply(ssid: String, password: String, status: UInt8 = 0x01) -> [UInt8] {
+    let name = Array(ssid.utf8), secret = Array(password.utf8)
+    return [0x02, 0x01, 0x04, status, UInt8(name.count & 0xFF), UInt8(name.count >> 8),
+            UInt8(secret.count & 0xFF), UInt8(secret.count >> 8)] + name + secret
+}
+
+@Test func theTransferFramesAreTheDocumentedBytes() {
+    #expect(HeyCyanCommand.enterTransferMode.bytes == hex("bc410300d053020104"))
+    #expect(HeyCyanCommand.transferProceed.bytes == hex("bc450200c2b00401"))
+    #expect(HeyCyanCommand.exitTransferMode.bytes == hex("bc4103001196020109"))
+}
+
+@Test func theTransferReplyGivesTheGlassesWiFiNameAndPassword() {
+    let frame = HeyCyanFrame(command: 0x41, payload: transferReply(ssid: "Glasses_1234", password: "example-pass")).encoded
+    // Spread over 20-byte notifications, as BLE delivers it.
+    let chunks = stride(from: 0, to: frame.count, by: 20).map { Array(frame[$0..<min($0 + 20, frame.count)]) }
+    let (frames, _) = parseAll(chunks)
+    #expect(frames.map(HeyCyanEvent.init) == [
+        .transferCredentials(HeyCyanWiFiCredentials(ssid: "Glasses_1234", password: "example-pass")),
+    ])
+}
+
+@Test func anOpenGlassesNetworkHasAnEmptyPassword() {
+    let credentials = HeyCyanWiFiCredentials(controlPayload: transferReply(ssid: "Glasses_1234", password: ""))
+    #expect(credentials == HeyCyanWiFiCredentials(ssid: "Glasses_1234", password: ""))
+}
+
+@Test func aTruncatedOrRefusedTransferReplyHasNoCredentials() {
+    var full = transferReply(ssid: "Glasses_1234", password: "example-pass")
+    full.removeLast()
+    #expect(HeyCyanWiFiCredentials(controlPayload: full) == nil)
+    #expect(HeyCyanWiFiCredentials(controlPayload: [0x02, 0x01, 0x04, 0x00]) == nil)
+    #expect(HeyCyanWiFiCredentials(controlPayload: transferReply(ssid: "", password: "example-pass")) == nil)
+    #expect(HeyCyanWiFiCredentials(controlPayload: transferReply(ssid: String(repeating: "a", count: 33), password: "x")) == nil)
+    var parser = HeyCyanFrameParser()
+    let refused = HeyCyanFrame(command: 0x41, payload: [0x02, 0x01, 0x04, 0x00]).encoded
+    #expect(parser.push(refused).map(HeyCyanEvent.init) == [.transferModeReply(byteCount: 4)])
+}
+
+@Test func theCredentialsNeverPrintTheirPasswordOrName() {
+    let credentials = HeyCyanWiFiCredentials(ssid: "Glasses_1234", password: "example-pass")
+    for text in [String(describing: credentials), String(reflecting: credentials), "\(credentials)",
+                 String(describing: HeyCyanEvent.transferCredentials(credentials))] {
+        #expect(!text.contains("example-pass"))
+        #expect(!text.contains("Glasses_1234"))
+    }
+}
+
+@Test func theProceedEchoTheExitReplyAndTheWiFiAddressDecode() {
+    var parser = HeyCyanFrameParser()
+    let echo = HeyCyanFrame(command: 0x45, payload: [0x04, 0x01]).encoded
+    let exit = HeyCyanFrame(command: 0x41, payload: [0x02, 0x01, 0x09, 0x01]).encoded
+    let address = HeyCyanFrame(command: 0x73, payload: [0x08, 0xC0, 0xA8, 0x31, 0x0E]).encoded
+    let zero = HeyCyanFrame(command: 0x73, payload: [0x08, 0, 0, 0, 0]).encoded
+    let short = HeyCyanFrame(command: 0x73, payload: [0x08, 0xC0, 0xA8]).encoded
+    let wifiError = HeyCyanFrame(command: 0x73, payload: [0x09, 0xFF]).encoded
+    #expect(parser.push(echo + exit + address + zero + short + wifiError).map(HeyCyanEvent.init) == [
+        .transferProceedEcho, .exitTransferReply, .wifiAddress("192.168.49.14"),
+        .otherEvent(type: 0x08), .otherEvent(type: 0x08), .wifiError(code: 255),
+    ])
+}
+
+@Test func addressesAreCheckedAndTheGatewayIsTheSubnetsFirstHost() {
+    #expect(HeyCyanGlassesAddress.isUsableIPv4("192.168.49.14"))
+    for bad in ["0.0.0.0", "255.255.255.255", "192.168.49", "192.168.49.256", "a.b.c.d", "192.168.49.1 ", "1..2.3", "+1.2.3.4"] {
+        #expect(!HeyCyanGlassesAddress.isUsableIPv4(bad), "\(bad)")
+    }
+    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.23", netmask: "255.255.255.0") == "192.168.49.1")
+    #expect(HeyCyanGlassesAddress.firstHost(address: "10.20.30.40", netmask: "255.255.0.0") == "10.20.0.1")
+    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.1", netmask: "255.255.255.0") == nil)
+    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.23", netmask: "255.0.255.0") == nil)
+    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.23", netmask: "255.255.255.255") == nil)
+    #expect(HeyCyanGlassesAddress.firstHost(address: "nonsense", netmask: "255.255.255.0") == nil)
+}
+
+@Test func candidatesPutTheReportedAddressFirstThenTheGatewayThenCommonOnes() {
+    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.49.14", gateway: "192.168.49.1")
+        == ["192.168.49.14", "192.168.49.1", "192.168.43.1", "192.168.4.1", "10.0.0.1", "192.168.1.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: nil, gateway: "172.20.10.1").prefix(2) == ["172.20.10.1", "192.168.49.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: "0.0.0.0", gateway: nil) == HeyCyanGlassesAddress.commonCandidates)
+}
+
+@Test func fileURLsArePlainHTTPUnderFiles() {
+    #expect(HeyCyanGlassesAddress.mediaListURL(host: "192.168.49.14")?.absoluteString == "http://192.168.49.14/files/media.config")
+    #expect(HeyCyanGlassesAddress.fileURL(host: "192.168.49.14", name: "20250102155119977.JPG")?.absoluteString
+        == "http://192.168.49.14/files/20250102155119977.JPG")
+    #expect(HeyCyanGlassesAddress.fileURL(host: "192.168.49.14", name: "photo 1.jpg")?.absoluteString
+        == "http://192.168.49.14/files/photo%201.jpg")
+    #expect(HeyCyanGlassesAddress.fileURL(host: "192.168.49.14", name: "../etc/passwd") == nil)
+    #expect(HeyCyanGlassesAddress.fileURL(host: "example.com", name: "a.jpg") == nil)
+}
+
+@Test func theMediaListIsOneNamePerLine() {
+    let text = "20250102155119977.JPG\r\n20250102155200001.mp4\n\n  20250102155300002.opus \n/files/20250102155400003.jpg\n../secret.jpg\n"
+    #expect(HeyCyanMediaList.fileNames(in: text)
+        == ["20250102155119977.JPG", "20250102155200001.mp4", "20250102155300002.opus", "20250102155400003.jpg"])
+    #expect(HeyCyanMediaList.fileNames(in: "").isEmpty)
+}
+
+@Test func theNewestPhotoIsChosenByItsTimestamp() {
+    let names = ["20250102155400003.jpg", "20250102155119977.JPG", "20250102155500004.mp4", "20250101000000000.jpeg"]
+    #expect(HeyCyanMediaList.newestPhoto(in: names) == "20250102155400003.jpg")
+    // Without timestamps the last photo in the list.
+    #expect(HeyCyanMediaList.newestPhoto(in: ["a.jpg", "clip.mp4", "b.JPG", "c.opus"]) == "b.JPG")
+    #expect(HeyCyanMediaList.newestPhoto(in: ["clip.mp4", "voice.opus"]) == nil)
+    #expect(HeyCyanMediaList.newestPhoto(in: []) == nil)
+    // Timestamped names win over names without one.
+    #expect(HeyCyanMediaList.newestPhoto(in: ["IMG_20251114_101500.jpg", "cover.jpg"]) == "IMG_20251114_101500.jpg")
+}
+
+@Test func onlyJPEGBytesCountAsAPhoto() {
+    #expect(HeyCyanMediaList.looksLikeJPEG([0xFF, 0xD8, 0xFF, 0xE0, 0x00]))
+    #expect(!HeyCyanMediaList.looksLikeJPEG(Array("<html>".utf8)))
+    #expect(!HeyCyanMediaList.looksLikeJPEG([0xFF, 0xD8]))
+    #expect(HeyCyanMediaList.looksLikeJPEG(Data([0xFF, 0xD8, 0xFF, 0xDB])))
 }

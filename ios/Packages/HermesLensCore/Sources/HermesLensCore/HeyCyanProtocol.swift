@@ -121,9 +121,10 @@ public struct HeyCyanFrameParser: Sendable {
     }
 }
 
-/// The only commands the app can send. Each is read-only or takes a photo; there is no way to
-/// build any other frame (factory reset `02 01 0A`, restart `02 01 0E`, OTA mode `02 01 05`,
-/// Wi-Fi transfer mode, DFU and firmware opcodes are deliberately absent).
+/// The only commands the app can send. Each is read-only, takes a photo, or opens and closes the
+/// glasses' own Wi-Fi for one photo download. There is no way to build any other frame: factory
+/// reset `02 01 0A`, restart `02 01 0E`, OTA mode `02 01 05`, DFU and firmware opcodes are
+/// deliberately absent.
 public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
     /// Glasses control: take one photo. It is stored on the glasses.
     case takePhoto
@@ -132,14 +133,24 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
     /// Battery level and charging state (read-only). The glasses also report the level on their
     /// own now and then (event 0x73, type 0x05), but too rarely to show it reliably.
     case batteryLevel
+    /// Glasses control: open the glasses' own Wi-Fi network for a photo download ("transfer
+    /// mode"). The reply carries that network's name and password (`HeyCyanWiFiCredentials`).
+    case enterTransferMode
+    /// "Proceed" after the credentials, wanted by some firmware: the glasses echo it, then
+    /// report their Wi-Fi address (event 0x73, type 0x08).
+    case transferProceed
+    /// Glasses control: close the glasses' Wi-Fi again. Always sent after a download attempt.
+    case exitTransferMode
 
     static let glassesControl: UInt8 = 0x41
     static let syncBattery: UInt8 = 0x42
+    static let transferProceedCommand: UInt8 = 0x45
 
     var command: UInt8 {
         switch self {
-        case .takePhoto, .mediaCount: Self.glassesControl
+        case .takePhoto, .mediaCount, .enterTransferMode, .exitTransferMode: Self.glassesControl
         case .batteryLevel: Self.syncBattery
+        case .transferProceed: Self.transferProceedCommand
         }
     }
 
@@ -148,6 +159,9 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         case .takePhoto: [0x02, 0x01, 0x01]
         case .mediaCount: [0x02, 0x04]
         case .batteryLevel: [0x00, 0x00]
+        case .enterTransferMode: [0x02, 0x01, 0x04]
+        case .transferProceed: [0x04, 0x01]
+        case .exitTransferMode: [0x02, 0x01, 0x09]
         }
     }
 
@@ -168,6 +182,9 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         case .takePhoto: "take_photo"
         case .mediaCount: "media_count"
         case .batteryLevel: "battery_level"
+        case .enterTransferMode: "enter_transfer_mode"
+        case .transferProceed: "transfer_proceed"
+        case .exitTransferMode: "exit_transfer_mode"
         }
     }
 }
@@ -183,6 +200,48 @@ public struct HeyCyanMediaCount: Equatable, Sendable {
         self.videos = videos
         self.recordings = recordings
     }
+}
+
+/// The glasses' own Wi-Fi network, from the reply to `HeyCyanCommand.enterTransferMode`:
+/// payload `02 01 04 <status> <name length UInt16 LE> <password length UInt16 LE> <name> <password>`.
+///
+/// The password is a secret: `description` never shows it (or the name), so printing or
+/// tracing a value cannot leak it.
+public struct HeyCyanWiFiCredentials: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    public let ssid: String
+    public let password: String
+
+    public init(ssid: String, password: String) {
+        self.ssid = ssid
+        self.password = password
+    }
+
+    /// 802.11 limits: a network name has 1–32 bytes, a WPA key at most 64 characters.
+    static let maximumSSIDBytes = 32
+    static let maximumPasswordBytes = 64
+
+    /// The credentials in a glasses control reply, or nil when the payload is not a complete
+    /// transfer-mode reply.
+    public init?(controlPayload p: [UInt8]) {
+        guard p.count >= 8, p[0] == 0x02, p[1] == 0x01, p[2] == 0x04 else { return nil }
+        let ssidLength = Int(p[4]) | Int(p[5]) << 8
+        let passwordLength = Int(p[6]) | Int(p[7]) << 8
+        guard ssidLength > 0, ssidLength <= Self.maximumSSIDBytes, passwordLength <= Self.maximumPasswordBytes,
+              8 + ssidLength + passwordLength <= p.count else { return nil }
+        func text(_ bytes: ArraySlice<UInt8>) -> String {
+            String(bytes: bytes, encoding: .utf8) ?? String(bytes: bytes, encoding: .isoLatin1) ?? ""
+        }
+        let ssid = text(p[8..<8 + ssidLength])
+        guard !ssid.isEmpty else { return nil }
+        self.ssid = ssid
+        self.password = text(p[(8 + ssidLength)..<(8 + ssidLength + passwordLength)])
+    }
+
+    public var description: String {
+        "HeyCyanWiFiCredentials(ssid: \(ssid.utf8.count) bytes, password: \(password.isEmpty ? "none" : "hidden"))"
+    }
+
+    public var debugDescription: String { description }
 }
 
 /// A decoded incoming frame. Audio and photo content is never kept: only sizes.
@@ -209,6 +268,19 @@ public enum HeyCyanEvent: Equatable, Sendable {
     /// and differ by model (`FF FF` and `00 02` on the L802, `FF 01` on the M01), so the app
     /// confirms a photo by the media count going up instead.
     case photoReply
+    /// Reply to `HeyCyanCommand.enterTransferMode` with the glasses' Wi-Fi network.
+    case transferCredentials(HeyCyanWiFiCredentials)
+    /// A transfer-mode reply without usable credentials (refused, or a format not understood).
+    case transferModeReply(byteCount: Int)
+    /// The glasses echoed `HeyCyanCommand.transferProceed`.
+    case transferProceedEcho
+    /// Reply to `HeyCyanCommand.exitTransferMode`.
+    case exitTransferReply
+    /// The glasses' Wi-Fi address during transfer mode (event 0x73, type 0x08: four IPv4 bytes).
+    case wifiAddress(String)
+    /// A Wi-Fi problem the glasses report (event 0x73, type 0x09). Code 255 is common and not
+    /// necessarily fatal, so the app only traces it.
+    case wifiError(code: Int)
     /// Another glasses control reply (0x41).
     case controlReply(byteCount: Int)
     /// A frame of a command this app does not know.
@@ -228,6 +300,10 @@ public enum HeyCyanEvent: Equatable, Sendable {
             case 0x0A: self = .micStopped
             case 0x12: self = .volume
             case 0x01 where p.count >= 2: self = .state(sequence: Int(p[1]))
+            case 0x08 where p.count >= 5:
+                let address = p[1...4].map(String.init).joined(separator: ".")
+                self = HeyCyanGlassesAddress.isUsableIPv4(address) ? .wifiAddress(address) : .otherEvent(type: type)
+            case 0x09: self = .wifiError(code: p.count >= 2 ? Int(p[1]) : -1)
             default: self = .otherEvent(type: type)
             }
         case Self.micAudioCommand:
@@ -241,9 +317,16 @@ public enum HeyCyanEvent: Equatable, Sendable {
                 self = .mediaCount(HeyCyanMediaCount(photos: le16(2), videos: le16(4), recordings: le16(6)))
             } else if p.count >= 3, p[0] == 0x02, p[1] == 0x01, p[2] == 0x01 {
                 self = .photoReply
+            } else if p.count >= 3, p[0] == 0x02, p[1] == 0x01, p[2] == 0x04 {
+                self = HeyCyanWiFiCredentials(controlPayload: p).map(Self.transferCredentials)
+                    ?? .transferModeReply(byteCount: p.count)
+            } else if p.count >= 3, p[0] == 0x02, p[1] == 0x01, p[2] == 0x09 {
+                self = .exitTransferReply
             } else {
                 self = .controlReply(byteCount: p.count)
             }
+        case HeyCyanCommand.transferProceedCommand:
+            self = .transferProceedEcho
         default:
             self = .unknown(command: frame.command, byteCount: p.count)
         }

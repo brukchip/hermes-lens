@@ -393,8 +393,10 @@ final class HeyCyanGlassesService: NSObject {
             for waiter in waiters.values { waiter.resume(returning: count) }
         case .photoReply:
             trace("heycyan.event", "photo_reply")
-        case .volume, .state, .otherEvent, .controlReply, .unknown:
-            break
+        case .volume, .state, .otherEvent, .controlReply, .unknown,
+             .transferCredentials, .transferModeReply, .transferProceedEcho, .exitTransferReply,
+             .wifiAddress, .wifiError:
+            break  // the transfer events are used from the next commit on
         }
     }
 
