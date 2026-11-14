@@ -223,6 +223,10 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
         == .mediaCount(HeyCyanMediaCount(photos: 8, videos: 1, recordings: 0)))
     #expect(decode("bc4105008c3d0201010002") == .photoReply)
     #expect(decode("bc4105000c4c020101ffff") == .photoReply)
+    // The M01 answers `02 01 01 FF 01`: still just "accepted".
+    var parser = HeyCyanFrameParser()
+    let m01Reply = HeyCyanFrame(command: 0x41, payload: [0x02, 0x01, 0x01, 0xFF, 0x01]).encoded
+    #expect(parser.push(m01Reply).map(HeyCyanEvent.init) == [.photoReply])
 }
 
 @Test func audioAndUnknownFramesAreSizesOnly() {
@@ -236,7 +240,36 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
 
 @Test func heyCyanNamesSortFirst() {
     #expect(HeyCyanDeviceName.looksLikeHeyCyan("L 802_0A1B"))
-    #expect(HeyCyanDeviceName.looksLikeHeyCyan("M01_1234"))
+    #expect(HeyCyanDeviceName.looksLikeHeyCyan("L802_0001"))
+    #expect(HeyCyanDeviceName.looksLikeHeyCyan("M01_0C2D"))
     #expect(!HeyCyanDeviceName.looksLikeHeyCyan("Mars"))
     #expect(!HeyCyanDeviceName.looksLikeHeyCyan("Bruk's AirPods"))
+}
+
+// MARK: Assistant button vs. the glasses' own listening after a photo
+
+@Test func micStartedWithoutAPhotoIsAButtonPress() {
+    let filter = HeyCyanAssistantButtonFilter()
+    #expect(filter.isButtonPress(micStartedAt: Date(timeIntervalSince1970: 1000)))
+}
+
+@Test func micStartedWithinTenSecondsOfThePhotoCommandIsNotAButtonPress() {
+    let sent = Date(timeIntervalSince1970: 1000)
+    var filter = HeyCyanAssistantButtonFilter()
+    filter.photoCommandSent(at: sent)
+    // The M01 started its mic right after the photo and streamed ~5 s of audio by itself.
+    #expect(!filter.isButtonPress(micStartedAt: sent))
+    #expect(!filter.isButtonPress(micStartedAt: sent.addingTimeInterval(0.4)))
+    #expect(!filter.isButtonPress(micStartedAt: sent.addingTimeInterval(9.9)))
+    #expect(filter.isButtonPress(micStartedAt: sent.addingTimeInterval(10)))
+    #expect(filter.isButtonPress(micStartedAt: sent.addingTimeInterval(60)))
+}
+
+@Test func eachPhotoCommandRestartsTheQuietWindow() {
+    let first = Date(timeIntervalSince1970: 1000)
+    var filter = HeyCyanAssistantButtonFilter()
+    filter.photoCommandSent(at: first)
+    filter.photoCommandSent(at: first.addingTimeInterval(8))
+    #expect(!filter.isButtonPress(micStartedAt: first.addingTimeInterval(12)))
+    #expect(filter.isButtonPress(micStartedAt: first.addingTimeInterval(18)))
 }

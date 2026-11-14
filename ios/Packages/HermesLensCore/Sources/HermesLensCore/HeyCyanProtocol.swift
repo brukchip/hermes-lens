@@ -196,8 +196,9 @@ public enum HeyCyanEvent: Equatable, Sendable {
     case micAudio(byteCount: Int)
     /// Reply to `HeyCyanCommand.mediaCount`.
     case mediaCount(HeyCyanMediaCount)
-    /// Reply to `HeyCyanCommand.takePhoto`. Its two status bytes are not understood yet
-    /// (seen `00 02` and `FF FF`), so the app confirms a photo by the media count instead.
+    /// Reply to `HeyCyanCommand.takePhoto`: accepted. Its two status bytes are not understood
+    /// and differ by model (`FF FF` and `00 02` on the L802, `FF 01` on the M01), so the app
+    /// confirms a photo by the media count going up instead.
     case photoReply
     /// Another glasses control reply (0x41).
     case controlReply(byteCount: Int)
@@ -237,12 +238,38 @@ public enum HeyCyanEvent: Equatable, Sendable {
     }
 }
 
-/// Advertised names. The glasses do not advertise their services, so the app lists every named
-/// device and puts the ones that look like HeyCyan glasses first; the user picks.
+/// Advertised names. The glasses do not advertise their services and names follow no fixed
+/// pattern, so the app lists every named device and sorts known model names first; the user picks.
 public enum HeyCyanDeviceName {
-    /// Seen: `L 802_0A1B`. The M01 is expected to advertise a name starting with `M01`.
+    /// Seen: `L 802_0A1B` and `M01_0C2D`.
     public static func looksLikeHeyCyan(_ name: String) -> Bool {
-        let compact = name.uppercased().replacingOccurrences(of: " ", with: "")
-        return ["L802", "M01", "HEYCYAN", "AM01"].contains { compact.hasPrefix($0) }
+        let upper = name.uppercased()
+        return ["M01", "L 802", "L802"].contains { upper.hasPrefix($0) }
+    }
+}
+
+/// Tells a press of the assistant button apart from the glasses' own listening after a photo.
+///
+/// Both arrive as the same "mic started" event. The M01 starts its microphone by itself right
+/// after the app's take-photo command (its own "describe the photo" listening, about 5 s of
+/// audio), so a mic-started event within `photoQuietSeconds` of the app's last photo command
+/// is never treated as the user pressing the button.
+public struct HeyCyanAssistantButtonFilter: Sendable {
+    public static let photoQuietSeconds: TimeInterval = 10
+
+    private var lastPhotoCommandAt: Date?
+
+    public init() {}
+
+    /// The app just sent `HeyCyanCommand.takePhoto`.
+    public mutating func photoCommandSent(at date: Date) {
+        lastPhotoCommandAt = date
+    }
+
+    /// Whether a mic-started event at `date` counts as an assistant button press.
+    public func isButtonPress(micStartedAt date: Date) -> Bool {
+        guard let lastPhotoCommandAt else { return true }
+        let elapsed = date.timeIntervalSince(lastPhotoCommandAt)
+        return elapsed < 0 || elapsed >= Self.photoQuietSeconds
     }
 }
