@@ -720,6 +720,7 @@ final class LunaNativeSession {
             case "glasses_folded": "The user's glasses are folded. Ask them to open and wear them, then look again."
             case "glasses_too_hot": "The glasses are too hot to use the camera. Tell the user to give them a few minutes; do not retry now."
             case "heycyan_photo_not_transferred": "A photo was taken with the user's HeyCyan glasses and is saved on the glasses, but it could not be brought to the phone, so no image is attached. Tell them in one short sentence; never guess what is in it. Do not retry unless they ask."
+            case "heycyan_photo_kept_in_call": "A photo was taken with the user's HeyCyan glasses and saved on the glasses. This version of Luna can't bring it to the phone during a call, so no image is attached. Say so in one short sentence, and that after the call they can bring a photo over in the You tab under Glasses with Take and fetch. Never guess what is in it; do not retry."
             case "heycyan_photo_unconfirmed": "The user's HeyCyan glasses did not confirm a new photo, so no image is attached. Tell them briefly; never guess what is in front of them."
             case "heycyan_not_connected": "The user's HeyCyan glasses are not connected. Ask them to connect them in the You tab, then try again."
             case "heycyan_busy": "The user's HeyCyan glasses are still bringing an earlier photo to the phone, so no image is attached. Tell them briefly and offer to look again in a moment; never guess."

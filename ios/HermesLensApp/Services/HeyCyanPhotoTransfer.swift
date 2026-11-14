@@ -2,6 +2,7 @@ import Foundation
 import HermesLensCore
 import NetworkExtension
 import Observation
+import UIKit
 
 /// Takes a photo on HeyCyan glasses and brings it to this iPhone, beta.
 ///
@@ -9,7 +10,12 @@ import Observation
 /// 1. Bluetooth: transfer mode (`0x41 02 01 04`). The reply holds the glasses' own Wi-Fi name
 ///    and password.
 /// 2. Bluetooth: "proceed" (`0x45 04 01`). Some firmware then reports its Wi-Fi address.
-/// 3. The iPhone joins that network (`NEHotspotConfiguration`, one system prompt, join once).
+/// 3. The iPhone joins that network. With the Hotspot Configuration entitlement (build flag
+///    `HERMES_HOTSPOT_JOIN`, paid developer teams) the app joins it itself: one system prompt,
+///    join once. Without it the app shows a card with the network's name and password, the
+///    user joins it in Settings › Wi-Fi, and the app polls until the glasses answer (90 s).
+///    A look in a call has no time for that, so without the entitlement it keeps the photo on
+///    the glasses (`HeyCyanFetchPlan`).
 /// 4. Plain HTTP: `http://<glasses>/files/media.config` lists the files; the newest JPEG is
 ///    downloaded from `/files/<name>` (at most 15 MB).
 /// 5. Always, success or failure: leave transfer mode (`0x41 02 01 09`) and remove the Wi-Fi
@@ -17,7 +23,8 @@ import Observation
 ///
 /// One photo at a time: a second request while one runs is refused (`busy`).
 /// Privacy: traces carry stage names, durations, the glasses' private IP and counts. Never the
-/// Wi-Fi name or password, file names, file contents or photo bytes.
+/// Wi-Fi name or password, file names, file contents or photo bytes. The manual card shows the
+/// name and password on screen: it is the glasses' own temporary network.
 @MainActor
 @Observable
 final class HeyCyanPhotoTransfer {
@@ -25,6 +32,7 @@ final class HeyCyanPhotoTransfer {
         case takingPhoto
         case openingGlassesWiFi
         case joiningWiFi
+        case waitingForManualJoin
         case findingGlasses
         case downloading
 
@@ -34,38 +42,66 @@ final class HeyCyanPhotoTransfer {
             case .takingPhoto: "Taking the photo on your glasses"
             case .openingGlassesWiFi: "Asking the glasses for the photo"
             case .joiningWiFi: "Joining your glasses' Wi-Fi. Tap Join if the iPhone asks."
+            case .waitingForManualJoin: "Waiting for you to join the glasses' Wi-Fi"
             case .findingGlasses: "Finding the glasses on their Wi-Fi"
             case .downloading: "Bringing the photo to this iPhone"
             }
         }
     }
 
+    /// The manual join card: the glasses' network, its password while the user needs it, and
+    /// the card's state. It stays after the transfer ("you can go back to your normal Wi-Fi")
+    /// until dismissed or the next photo.
+    struct ManualJoinCard: Equatable {
+        var ssid: String
+        /// Shown on screen while waiting for the join; cleared once the glasses answer.
+        var password: String?
+        var state: HeyCyanManualJoin
+    }
+
     /// What is happening now; nil when idle.
     private(set) var stage: Stage?
     var isBusy: Bool { stage != nil }
+    private(set) var manualJoin: ManualJoinCard?
 
-    /// A look in a call must finish or give up within about 25 s in total.
-    static let callBudget: Duration = .seconds(25)
-    /// The Photo flow and the Settings test: the user is watching and may need a moment for the
-    /// system's "Join network" prompt.
-    static let interactiveBudget: Duration = .seconds(45)
+    /// Whether this build may join the glasses' Wi-Fi itself (the Hotspot Configuration
+    /// entitlement, opt-in with `HERMES_HOTSPOT_JOIN = YES`; see README).
+    static var automaticJoinAvailable: Bool {
+        #if HERMES_HOTSPOT_JOIN
+        true
+        #else
+        false
+        #endif
+    }
 
     private let glasses: HeyCyanGlassesService
     private let clock = ContinuousClock()
+    private let clockOrigin = ContinuousClock.now
+    @ObservationIgnored private var stopRequested = false
+    @ObservationIgnored private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     init(glasses: HeyCyanGlassesService) {
         self.glasses = glasses
     }
 
-    /// Takes one photo on the glasses and, when `fetch` is true, brings it to this iPhone
-    /// within `budget` (counted from now, the photo included).
-    func takePhoto(fetch: Bool, budget: Duration) async -> HeyCyanPhotoOutcome {
+    /// Takes one photo on the glasses and, when `fetch` is true, brings it to this iPhone as
+    /// `HeyCyanFetchPlan` allows for `context`, within the plan's budget counted from
+    /// `startedAt` (a reconnect before it included).
+    func takePhoto(fetch: Bool, context: HeyCyanFetchPlan.Context,
+                   startedAt: ContinuousClock.Instant = .now) async -> HeyCyanPhotoOutcome {
         guard stage == nil else {
             trace("stage=start ms=0 result=busy")
             return .busy
         }
-        let deadline = clock.now + budget
+        let plan = HeyCyanFetchPlan.plan(for: context, automaticJoinAvailable: Self.automaticJoinAvailable)
+        let budgetSeconds = switch plan {
+        case .automaticJoin(let seconds), .manualJoin(let seconds): seconds
+        case .keepOnGlasses: HeyCyanFetchPlan.callBudgetSeconds
+        }
+        let deadline = startedAt + .seconds(budgetSeconds)
         stage = .takingPhoto
+        manualJoin = nil
+        stopRequested = false
         defer { stage = nil }
         let photo: HeyCyanGlassesService.PhotoResult
         do {
@@ -78,8 +114,17 @@ final class HeyCyanPhotoTransfer {
         guard photo.confirmed else { return .unconfirmed }
         let count = photo.after.photos
         guard fetch else { return .keptOnGlasses(photosOnGlasses: count, reason: nil) }
+        let manual: Bool
+        switch plan {
+        case .keepOnGlasses:
+            // A call cannot wait for the user to join a Wi-Fi network in Settings.
+            trace("stage=plan ms=0 result=kept_on_glasses automatic_join=false")
+            return .keptForLater(photosOnGlasses: count)
+        case .automaticJoin: manual = false
+        case .manualJoin: manual = true
+        }
         do {
-            return .fetched(jpeg: try await fetchNewestPhoto(deadline: deadline), photosOnGlasses: count)
+            return .fetched(jpeg: try await fetchNewestPhoto(deadline: deadline, manual: manual), photosOnGlasses: count)
         } catch {
             return .keptOnGlasses(photosOnGlasses: count, reason: error.reason)
         }
@@ -87,12 +132,25 @@ final class HeyCyanPhotoTransfer {
 
     // MARK: The transfer
 
-    private func fetchNewestPhoto(deadline: ContinuousClock.Instant) async throws(HeyCyanTransferFailure) -> Data {
+    /// Stops waiting for a manual join (the card's Stop button).
+    func stopManualJoin() {
+        guard manualJoin?.state.phase == .waitingForJoin else { return }
+        stopRequested = true
+    }
+
+    /// Hides a finished card.
+    func dismissManualJoin() {
+        guard let phase = manualJoin?.state.phase, phase == .finished || phase == .gaveUp else { return }
+        manualJoin = nil
+    }
+
+    private func fetchNewestPhoto(deadline: ContinuousClock.Instant, manual: Bool) async throws(HeyCyanTransferFailure) -> Data {
         let started = clock.now
         var joinedSSID: String?
         var enteredTransferMode = false
+        trace("stage=plan ms=0 result=\(manual ? "manual_join" : "automatic_join")")
         do {
-            let jpeg = try await transfer(deadline: deadline, enteredTransferMode: &enteredTransferMode,
+            let jpeg = try await transfer(deadline: deadline, manual: manual, enteredTransferMode: &enteredTransferMode,
                                           joinedSSID: &joinedSSID)
             cleanUp(enteredTransferMode: enteredTransferMode, joinedSSID: joinedSSID)
             trace("stage=total ms=\(ms(since: started)) result=ok")
@@ -104,11 +162,11 @@ final class HeyCyanPhotoTransfer {
         }
     }
 
-    private func transfer(deadline: ContinuousClock.Instant, enteredTransferMode: inout Bool,
+    private func transfer(deadline: ContinuousClock.Instant, manual: Bool, enteredTransferMode: inout Bool,
                           joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> Data {
         // 1. Transfer mode: the glasses' Wi-Fi name and password over Bluetooth.
         stage = .openingGlassesWiFi
-        var stageStart = clock.now
+        let stageStart = clock.now
         let credentials: HeyCyanWiFiCredentials
         do {
             enteredTransferMode = true
@@ -134,9 +192,49 @@ final class HeyCyanPhotoTransfer {
         }
         try checkTime(deadline, need: .seconds(6))
 
+        let found: Found
+        if manual {
+            // 3–4. The user joins in Settings › Wi-Fi; the app polls until the glasses answer.
+            found = try await waitForManualJoin(credentials, deadline: deadline)
+        } else {
+            found = try await joinAndFind(credentials, deadline: deadline, joinedSSID: &joinedSSID)
+        }
+
+        // 5. Download the newest photo.
+        stage = .downloading
+        let downloadStart = clock.now
+        guard let url = HeyCyanGlassesAddress.fileURL(host: found.host, name: found.photo) else {
+            trace("stage=download ms=0 result=bad_name")
+            throw .noPhotoListed
+        }
+        let downloadSeconds = max(1, remaining(deadline).seconds)
+        do {
+            let jpeg = try await HeyCyanHTTP.get(url, timeout: downloadSeconds, maxBytes: HeyCyanMediaList.maximumPhotoBytes)
+            guard HeyCyanMediaList.looksLikeJPEG(jpeg) else {
+                trace("stage=download ms=\(ms(since: downloadStart)) result=not_jpeg bytes=\(jpeg.count)")
+                throw HeyCyanTransferFailure.notAPhoto
+            }
+            trace("stage=download ms=\(ms(since: downloadStart)) result=ok bytes=\(jpeg.count)")
+            return jpeg
+        } catch let failure as HeyCyanTransferFailure {
+            throw failure
+        } catch {
+            let failure: HeyCyanTransferFailure = switch error as? HeyCyanHTTPError {
+            case .tooLarge: .tooLarge
+            default: Task.isCancelled ? .cancelled : .downloadFailed
+            }
+            trace("stage=download ms=\(ms(since: downloadStart)) result=\(failure.traceLabel) "
+                + "error=\(HeyCyanHTTP.label(error))")
+            throw failure
+        }
+    }
+
+    /// Steps 3–4 with the entitlement: join with `NEHotspotConfiguration`, then find the glasses.
+    private func joinAndFind(_ credentials: HeyCyanWiFiCredentials, deadline: ContinuousClock.Instant,
+                             joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> Found {
         // 3. Join the glasses' Wi-Fi (one system prompt).
         stage = .joiningWiFi
-        stageStart = clock.now
+        var stageStart = clock.now
         joinedSSID = credentials.ssid
         let joinTimeout = max(.seconds(3), remaining(deadline) - .seconds(4))
         let joinResult = await join(credentials, timeout: joinTimeout)
@@ -158,39 +256,88 @@ final class HeyCyanPhotoTransfer {
         let found = try await findGlasses(deadline: deadline)
         trace("stage=find ms=\(ms(since: stageStart)) result=ok ip=\(found.host) source=\(found.source) "
             + "rounds=\(found.rounds) file_count=\(found.fileCount)")
+        return found
+    }
 
-        // 5. Download the newest photo.
-        stage = .downloading
-        stageStart = clock.now
-        guard let url = HeyCyanGlassesAddress.fileURL(host: found.host, name: found.photo) else {
-            trace("stage=download ms=0 result=bad_name")
+    // MARK: The manual join card
+
+    /// Steps 3–4 without the entitlement: shows the card and asks every candidate address for
+    /// `media.config` every 1.5 s for up to 90 s (`HeyCyanManualJoin`). Background time is
+    /// requested so polling can go on for a while when the user switches to Settings.
+    private func waitForManualJoin(_ credentials: HeyCyanWiFiCredentials,
+                                   deadline: ContinuousClock.Instant) async throws(HeyCyanTransferFailure) -> Found {
+        stage = .waitingForManualJoin
+        let stageStart = clock.now
+        var state = HeyCyanManualJoin(startedAt: seconds(clock.now))
+        manualJoin = ManualJoinCard(ssid: credentials.ssid, password: credentials.password, state: state)
+        beginBackgroundTime()
+        trace("stage=manual_join ms=0 result=card_shown has_password=\(!credentials.password.isEmpty)")
+        var answeredWithoutPhoto: (host: String, fileCount: Int)?
+        while state.shouldPoll(at: seconds(clock.now)), remaining(deadline) > .seconds(5), !stopRequested {
+            if Task.isCancelled { break }
+            let pollStart = seconds(clock.now)
+            let reported = glasses.reportedWiFiAddress
+            let gateway = HeyCyanLocalNetwork.wifiGateway()
+            let hosts = HeyCyanGlassesAddress.candidates(reported: reported, gateway: gateway)
+            let result = await Self.probe(hosts, timeout: HeyCyanManualJoin.probeTimeout)
+            switch result {
+            case .photo(let host, let name, let fileCount):
+                state.recordPoll(answered: true, at: seconds(clock.now))
+                manualJoin?.state = state
+                manualJoin?.password = nil
+                let source = host == reported ? "reported" : host == gateway ? "gateway" : "common"
+                trace("stage=manual_join ms=\(ms(since: stageStart)) result=ok ip=\(host) source=\(source) "
+                    + "polls=\(state.polls) file_count=\(fileCount)")
+                return Found(host: host, source: source, rounds: state.polls, fileCount: fileCount, photo: name)
+            case .noPhoto(let host, let fileCount):
+                state.recordPoll(answered: true, at: seconds(clock.now))
+                answeredWithoutPhoto = (host, fileCount)
+            case .unreachable:
+                state.recordPoll(answered: false, at: seconds(clock.now))
+            }
+            manualJoin?.state = state
+            if answeredWithoutPhoto != nil { break }
+            let now = seconds(clock.now)
+            try? await Task.sleep(for: .seconds(state.delayBeforeNextPoll(pollStartedAt: pollStart, now: now)))
+        }
+        if let answeredWithoutPhoto {
+            trace("stage=manual_join ms=\(ms(since: stageStart)) result=no_photo_listed ip=\(answeredWithoutPhoto.host) "
+                + "polls=\(state.polls) file_count=\(answeredWithoutPhoto.fileCount)")
             throw .noPhotoListed
         }
-        let seconds = max(1, remaining(deadline).seconds)
-        do {
-            let jpeg = try await HeyCyanHTTP.get(url, timeout: seconds, maxBytes: HeyCyanMediaList.maximumPhotoBytes)
-            guard HeyCyanMediaList.looksLikeJPEG(jpeg) else {
-                trace("stage=download ms=\(ms(since: stageStart)) result=not_jpeg bytes=\(jpeg.count)")
-                throw HeyCyanTransferFailure.notAPhoto
-            }
-            trace("stage=download ms=\(ms(since: stageStart)) result=ok bytes=\(jpeg.count)")
-            return jpeg
-        } catch let failure as HeyCyanTransferFailure {
-            throw failure
-        } catch {
-            let failure: HeyCyanTransferFailure = switch error as? HeyCyanHTTPError {
-            case .tooLarge: .tooLarge
-            default: Task.isCancelled ? .cancelled : .downloadFailed
-            }
-            trace("stage=download ms=\(ms(since: stageStart)) result=\(failure.traceLabel) "
-                + "error=\(HeyCyanHTTP.label(error))")
-            throw failure
+        let failure: HeyCyanTransferFailure = stopRequested ? .stopped
+            : Task.isCancelled ? .cancelled
+            : state.shouldPoll(at: seconds(clock.now)) ? .outOfTime : .manualJoinTimedOut
+        trace("stage=manual_join ms=\(ms(since: stageStart)) result=\(failure.traceLabel) polls=\(state.polls)")
+        throw failure
+    }
+
+    private func beginBackgroundTime() {
+        guard backgroundTask == .invalid else { return }
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Glasses photo") { [weak self] in
+            MainActor.assumeIsolated { self?.endBackgroundTime() }
         }
+    }
+
+    private func endBackgroundTime() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+
+    /// Seconds on the transfer's monotonic clock, for `HeyCyanManualJoin`.
+    private func seconds(_ instant: ContinuousClock.Instant) -> TimeInterval {
+        (instant - clockOrigin).seconds
     }
 
     /// Leaves transfer mode and forgets the glasses' network. Runs on every path.
     private func cleanUp(enteredTransferMode: Bool, joinedSSID: String?) {
         if enteredTransferMode { glasses.exitTransferMode() }
+        if manualJoin != nil {
+            manualJoin?.state.end()
+            manualJoin?.password = nil
+        }
+        endBackgroundTime()
         if let joinedSSID { NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: joinedSSID) }
         trace("stage=cleanup ms=0 result=done exit_sent=\(enteredTransferMode) wifi_removed=\(joinedSSID != nil)")
     }
@@ -371,6 +518,10 @@ enum HeyCyanTransferFailure: Error, Equatable {
     case downloadFailed
     case outOfTime
     case cancelled
+    /// The manual join card waited 90 s and the glasses never answered.
+    case manualJoinTimedOut
+    /// The user tapped Stop on the manual join card.
+    case stopped
 
     var reason: String {
         switch self {
@@ -389,6 +540,8 @@ enum HeyCyanTransferFailure: Error, Equatable {
         case .downloadFailed: "the download didn't finish."
         case .outOfTime: "it took too long."
         case .cancelled: "it was stopped."
+        case .manualJoinTimedOut: "the glasses didn't answer on their Wi-Fi within 90 seconds."
+        case .stopped: "you stopped it."
         }
     }
 
@@ -409,6 +562,8 @@ enum HeyCyanTransferFailure: Error, Equatable {
         case .downloadFailed: "download_failed"
         case .outOfTime: "out_of_time"
         case .cancelled: "cancelled"
+        case .manualJoinTimedOut: "manual_join_timeout"
+        case .stopped: "stopped"
         }
     }
 }

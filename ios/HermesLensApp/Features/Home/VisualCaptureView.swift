@@ -78,6 +78,13 @@ struct VisualCaptureView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     preview
                     status
+                    if kind == .photo, model.glassesBrand == .heyCyan, model.heyCyanTransfer.manualJoin != nil {
+                        // Builds that can't join the glasses' Wi-Fi themselves ask the user to.
+                        HeyCyanJoinCard()
+                            .padding(LunaMetrics.cardPadding)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lunaCard()
+                    }
                     feedback
                     privacyNote
                 }

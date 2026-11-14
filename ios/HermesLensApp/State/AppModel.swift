@@ -303,7 +303,7 @@ final class AppModel {
             // A photo on the glasses, brought over their Wi-Fi within the call's look budget.
             // When it cannot be brought over, Luna is told why (by the error's code) instead of
             // being given an image.
-            let outcome = await takeHeyCyanPhoto(fetch: true, budget: HeyCyanPhotoTransfer.callBudget)
+            let outcome = await takeHeyCyanPhoto(fetch: true, context: .call)
             guard case .fetched(let jpeg, _) = outcome else { throw LunaCameraError(code: outcome.lookCode) }
             VoiceDiagnosticLog.record("glasses.call_frame", "source=heycyan \(Self.imageShape(jpeg))")
             _ = try? await beginArtifact(data: jpeg, kind: .photo, request: "Photo from a Luna call")
@@ -850,17 +850,17 @@ final class AppModel {
     }
 
     /// Takes one photo on the HeyCyan glasses, reconnecting first if they were remembered, and
-    /// with `fetch` brings it to this iPhone. Everything, the reconnect included, fits `budget`.
-    /// A second request while one runs is refused (`busy`).
-    func takeHeyCyanPhoto(fetch: Bool, budget: Duration = HeyCyanPhotoTransfer.interactiveBudget) async -> HeyCyanPhotoOutcome {
+    /// with `fetch` brings it to this iPhone as `HeyCyanFetchPlan` allows for `context`. The
+    /// plan's budget counts from here, the reconnect included. A second request while one runs
+    /// is refused (`busy`).
+    func takeHeyCyanPhoto(fetch: Bool, context: HeyCyanFetchPlan.Context = .interactive) async -> HeyCyanPhotoOutcome {
         guard !heyCyanTransfer.isBusy else { return .busy }
-        let clock = ContinuousClock()
-        let started = clock.now
+        let started = ContinuousClock.now
         if !heyCyan.isConnected, let id = settings.heyCyanPeripheralID {
             try? await heyCyan.connect(to: id)
         }
         guard heyCyan.isConnected else { return .notConnected }
-        return await heyCyanTransfer.takePhoto(fetch: fetch, budget: budget - (clock.now - started))
+        return await heyCyanTransfer.takePhoto(fetch: fetch, context: context, startedAt: started)
     }
 
     /// The Photo and Video flows with HeyCyan glasses: the photo is taken on the glasses, brought
@@ -885,7 +885,7 @@ final class AppModel {
                 lastCaptureError = error.localizedDescription
                 return nil
             }
-        case .keptOnGlasses:
+        case .keptOnGlasses, .keptForLater:
             lastCaptureKeptOnGlasses = true
             lastCaptureError = outcome.message
         default:

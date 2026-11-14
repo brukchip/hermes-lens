@@ -2,7 +2,9 @@ import SwiftUI
 
 /// You › Glasses when HeyCyan (beta) is chosen: scan, pick, connect or forget, battery, a test
 /// photo that stays on the glasses, and a test photo brought to this iPhone over the glasses'
-/// Wi-Fi (shown as a thumbnail only: nothing is saved or sent, so no server is needed).
+/// Wi-Fi (shown as a thumbnail only: nothing is saved or sent, so no server is needed). Builds
+/// without the Hotspot Configuration entitlement ask the user to join that Wi-Fi in Settings
+/// (`HeyCyanJoinCard`).
 struct HeyCyanSettingsRows: View {
     @Environment(AppModel.self) private var model
     @State private var testPhotoMessage: String?
@@ -50,7 +52,10 @@ struct HeyCyanSettingsRows: View {
                 .disabled(isTakingTestPhoto || model.heyCyanTransfer.isBusy)
                 .accessibilityIdentifier("settings.heycyan.fetchPhoto")
             }
-            if let stage = model.heyCyanTransfer.stage {
+            if model.heyCyanTransfer.manualJoin != nil {
+                HeyCyanJoinCard()
+            }
+            if let stage = model.heyCyanTransfer.stage, stage != .waitingForManualJoin {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text(stage.displayText)

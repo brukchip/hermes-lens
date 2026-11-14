@@ -38,6 +38,9 @@ enum HeyCyanPhotoOutcome: Equatable {
     /// Taken and confirmed by the photo count; it is stored on the glasses. `reason` says why it
     /// could not be brought over (nil when that was not asked for).
     case keptOnGlasses(photosOnGlasses: Int, reason: String?)
+    /// Taken in a call by a build that can't join the glasses' Wi-Fi by itself: there is no
+    /// time to wait for a manual join, so it stays on the glasses (`HeyCyanFetchPlan`).
+    case keptForLater(photosOnGlasses: Int)
     /// The command went out but the photo count did not go up.
     case unconfirmed
     case notConnected
@@ -51,6 +54,7 @@ enum HeyCyanPhotoOutcome: Equatable {
         case .fetched: "Photo taken and brought to this iPhone."
         case .keptOnGlasses(let count, nil): "Photo taken and saved on your glasses (\(count) there now)."
         case .keptOnGlasses(_, let reason?): "I took the photo, but couldn't bring it to your phone: \(reason)"
+        case .keptForLater: "I took the photo; it's saved on your glasses. To bring a photo to this iPhone, use You › Glasses › Take and fetch a test photo."
         case .unconfirmed: "The glasses didn't confirm a new photo. Check them and try again."
         case .notConnected: "Your HeyCyan glasses aren't connected. Connect them in You › Glasses."
         case .busy: "I'm still bringing the last photo over from your glasses. Try again in a moment."
@@ -63,6 +67,7 @@ enum HeyCyanPhotoOutcome: Equatable {
         switch self {
         case .fetched: "heycyan_photo_fetched"
         case .keptOnGlasses: "heycyan_photo_not_transferred"
+        case .keptForLater: "heycyan_photo_kept_in_call"
         case .unconfirmed, .failed: "heycyan_photo_unconfirmed"
         case .notConnected: "heycyan_not_connected"
         case .busy: "heycyan_busy"
