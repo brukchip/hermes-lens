@@ -11,10 +11,12 @@ import UIKit
 ///    it). The reply holds the glasses' own Wi-Fi name and password; about 8 s later the
 ///    glasses report their address (event 0x73/08, 192.168.31.1 on the L802).
 /// 2. (No step: `0x45` is the AI voice heartbeat, not a "proceed".)
-/// 3. The iPhone joins that network. With the Hotspot Configuration entitlement (build flag
-///    `HERMES_HOTSPOT_JOIN`, paid developer teams) the app joins it itself: one system prompt,
-///    join once. Without it the app shows a card with the network's name and password, the
-///    user joins it in Settings › Wi-Fi, and the app polls until the glasses answer (3 minutes).
+/// 3. The iPhone joins that hidden WPA2 network, with the reported password and then the
+///    fixed `123456789` (community notes: the firmware may report a wrong one). With the
+///    Hotspot Configuration entitlement (build flag `HERMES_HOTSPOT_JOIN`, paid developer
+///    teams) the app joins it itself: one system prompt per password, join once, hidden.
+///    Without it the app shows a card with the network's name and password, the user joins it
+///    in Settings › Wi-Fi › Other…, and the app polls until the glasses answer (3 minutes).
 ///    A look in a call has no time for that, so without the entitlement it keeps the photo on
 ///    the glasses (`HeyCyanFetchPlan`).
 /// 4. Plain HTTP: `http://<glasses>/files/media.config` lists the files; the newest JPEG is
@@ -79,6 +81,9 @@ final class HeyCyanPhotoTransfer {
     private let clock = ContinuousClock()
     private let clockOrigin = ContinuousClock.now
     @ObservationIgnored private var stopRequested = false
+    /// When the credentials arrived, and whether the glasses' IP event was traced since.
+    @ObservationIgnored private var credentialsAt: ContinuousClock.Instant?
+    @ObservationIgnored private var wifiIPTraced = false
     @ObservationIgnored private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     init(glasses: HeyCyanGlassesService) {
@@ -149,14 +154,18 @@ final class HeyCyanPhotoTransfer {
         let started = clock.now
         var joinedSSID: String?
         var enteredTransferMode = false
+        credentialsAt = nil
+        wifiIPTraced = false
         trace("stage=plan ms=0 result=\(manual ? "manual_join" : "automatic_join")")
         do {
             let jpeg = try await transfer(deadline: deadline, manual: manual, enteredTransferMode: &enteredTransferMode,
                                           joinedSSID: &joinedSSID)
+            traceWiFiIP(final: true)
             cleanUp(enteredTransferMode: enteredTransferMode, joinedSSID: joinedSSID)
             trace("stage=total ms=\(ms(since: started)) result=ok")
             return jpeg
         } catch {
+            traceWiFiIP(final: true)
             cleanUp(enteredTransferMode: enteredTransferMode, joinedSSID: joinedSSID)
             trace("stage=total ms=\(ms(since: started)) result=\(error.traceLabel)")
             throw error
@@ -181,7 +190,9 @@ final class HeyCyanPhotoTransfer {
             trace("stage=credentials ms=\(ms(since: stageStart)) result=\(failure.traceLabel)")
             throw failure
         }
-        trace("stage=credentials ms=\(ms(since: stageStart)) result=ok has_password=\(!credentials.password.isEmpty)")
+        trace("stage=credentials ms=\(ms(since: stageStart)) result=ok has_password=\(!credentials.password.isEmpty) "
+            + "password_is_fixed=\(credentials.password == HeyCyanWiFiCredentials.fallbackPassword)")
+        credentialsAt = clock.now
 
         try checkTime(deadline, need: .seconds(6))
 
@@ -222,34 +233,56 @@ final class HeyCyanPhotoTransfer {
         }
     }
 
-    /// Steps 3–4 with the entitlement: join with `NEHotspotConfiguration`, then find the glasses.
+    /// Steps 3–4 with the entitlement: join the hidden network with `NEHotspotConfiguration`,
+    /// then find the glasses; with the reported password first, then the fixed one, splitting
+    /// the time left between the attempts.
     private func joinAndFind(_ credentials: HeyCyanWiFiCredentials, deadline: ContinuousClock.Instant,
                              joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> Found {
-        // 3. Join the glasses' Wi-Fi (one system prompt).
-        stage = .joiningWiFi
-        var stageStart = clock.now
-        joinedSSID = credentials.ssid
-        let joinTimeout = max(.seconds(3), remaining(deadline) - .seconds(4))
-        let joinResult = await join(credentials, timeout: joinTimeout)
-        switch joinResult {
-        case .joined(let already):
-            trace("stage=join ms=\(ms(since: stageStart)) result=ok already=\(already)")
-        case .failed(let failure, let code):
-            trace("stage=join ms=\(ms(since: stageStart)) result=\(failure.traceLabel) code=\(code)")
-            throw failure
-        }
+        let passwords = credentials.passwordsToTry
+        var lastFailure = HeyCyanTransferFailure.glassesNotFound
+        for (index, password) in passwords.enumerated() {
+            if Task.isCancelled { throw .cancelled }
+            let which = password == credentials.password ? "reported" : "fixed"
+            let attemptDeadline = clock.now + remaining(deadline) / (passwords.count - index)
+            guard remaining(attemptDeadline) > .seconds(4) else { break }
 
-        // 4. Find the glasses' HTTP server and read the file list.
-        stage = .findingGlasses
-        stageStart = clock.now
-        if glasses.reportedWiFiAddress == nil {
-            let wait = min(.seconds(3), remaining(deadline) - .seconds(3))
-            if wait > .zero { _ = await glasses.waitForWiFiAddress(timeout: wait) }
+            // 3. Join the glasses' hidden Wi-Fi (one system prompt).
+            stage = .joiningWiFi
+            var stageStart = clock.now
+            if let previous = joinedSSID {
+                NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: previous)
+            }
+            joinedSSID = credentials.ssid
+            let joinTimeout = max(.seconds(3), remaining(attemptDeadline) - .seconds(3))
+            switch await join(ssid: credentials.ssid, password: password, timeout: joinTimeout) {
+            case .joined(let already):
+                trace("stage=join ms=\(ms(since: stageStart)) result=ok already=\(already) password=\(which) attempt=\(index + 1)")
+            case .failed(let failure, let code):
+                trace("stage=join ms=\(ms(since: stageStart)) result=\(failure.traceLabel) code=\(code) "
+                    + "password=\(which) attempt=\(index + 1)")
+                // The user said no, or Luna is in the background: another password won't help.
+                if failure == .joinDenied || failure == .notInForeground { throw failure }
+                lastFailure = failure
+                continue
+            }
+
+            // 4. Find the glasses' HTTP server and read the file list.
+            stage = .findingGlasses
+            stageStart = clock.now
+            if glasses.reportedWiFiAddress == nil {
+                let wait = min(.seconds(3), remaining(attemptDeadline) - .seconds(3))
+                if wait > .zero { _ = await glasses.waitForWiFiAddress(timeout: wait) }
+            }
+            do {
+                let found = try await findGlasses(deadline: attemptDeadline)
+                trace("stage=find ms=\(ms(since: stageStart)) result=ok ip=\(found.host) source=\(found.source) "
+                    + "rounds=\(found.rounds) file_count=\(found.fileCount) password=\(which)")
+                return found
+            } catch .glassesNotFound {
+                lastFailure = .glassesNotFound  // perhaps the wrong password: try the next one
+            }
         }
-        let found = try await findGlasses(deadline: deadline)
-        trace("stage=find ms=\(ms(since: stageStart)) result=ok ip=\(found.host) source=\(found.source) "
-            + "rounds=\(found.rounds) file_count=\(found.fileCount)")
-        return found
+        throw lastFailure
     }
 
     // MARK: The manual join card
@@ -269,6 +302,7 @@ final class HeyCyanPhotoTransfer {
         while state.shouldPoll(at: seconds(clock.now)), remaining(deadline) > .seconds(5), !stopRequested {
             if Task.isCancelled { break }
             let pollStart = seconds(clock.now)
+            traceWiFiIP(final: false)
             let reported = glasses.reportedWiFiAddress
             let gateway = HeyCyanLocalNetwork.wifiGateway()
             let hosts = HeyCyanGlassesAddress.candidates(reported: reported, gateway: gateway)
@@ -303,6 +337,20 @@ final class HeyCyanPhotoTransfer {
             : state.shouldPoll(at: seconds(clock.now)) ? .outOfTime : .manualJoinTimedOut
         trace("stage=manual_join ms=\(ms(since: stageStart)) result=\(failure.traceLabel) polls=\(state.polls)")
         throw failure
+    }
+
+    /// `stage=wifi_ip`: the glasses' IP event and how long after the credentials it came, once
+    /// per transfer; with `final`, `result=none` when it never came.
+    private func traceWiFiIP(final: Bool) {
+        guard !wifiIPTraced, let credentialsAt else { return }
+        if let address = glasses.reportedWiFiAddress {
+            let at = glasses.reportedWiFiAddressAt ?? clock.now
+            wifiIPTraced = true
+            trace("stage=wifi_ip ms=\(max(0, ms(since: credentialsAt) - ms(since: at))) result=ok ip=\(address)")
+        } else if final {
+            wifiIPTraced = true
+            trace("stage=wifi_ip ms=\(ms(since: credentialsAt)) result=none")
+        }
     }
 
     private func beginBackgroundTime() {
@@ -344,11 +392,11 @@ final class HeyCyanPhotoTransfer {
 
     /// Applies a join-once configuration. Waits at most `timeout` (the system prompt included);
     /// a late answer is ignored, and the configuration is removed by `cleanUp` either way.
-    private func join(_ credentials: HeyCyanWiFiCredentials, timeout: Duration) async -> JoinResult {
-        let configuration = credentials.password.isEmpty
-            ? NEHotspotConfiguration(ssid: credentials.ssid)
-            : NEHotspotConfiguration(ssid: credentials.ssid, passphrase: credentials.password, isWEP: false)
+    private func join(ssid: String, password: String, timeout: Duration) async -> JoinResult {
+        let configuration = NEHotspotConfiguration(ssid: ssid, passphrase: password, isWEP: false)
         configuration.joinOnce = true
+        // The glasses' hotspot does not broadcast its name.
+        configuration.hidden = true
         let gate = OnceGate<JoinResult>()
         return await withCheckedContinuation { continuation in
             gate.continuation = continuation
@@ -409,6 +457,7 @@ final class HeyCyanPhotoTransfer {
         while remaining(deadline) > .milliseconds(2500) {
             if Task.isCancelled { throw .cancelled }
             rounds += 1
+            traceWiFiIP(final: false)
             let reported = glasses.reportedWiFiAddress
             let gateway = HeyCyanLocalNetwork.wifiGateway()
             let hosts = HeyCyanGlassesAddress.candidates(reported: reported, gateway: gateway)

@@ -1,3 +1,4 @@
+import HermesLensCore
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -9,7 +10,9 @@ import UniformTypeIdentifiers
 struct HeyCyanJoinCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    @State private var copied = false
+    @State private var copied: Copied?
+
+    private enum Copied { case name, password, fixed }
 
     var body: some View {
         if let card = model.heyCyanTransfer.manualJoin {
@@ -32,24 +35,45 @@ struct HeyCyanJoinCard: View {
     @ViewBuilder
     private func waiting(_ card: HeyCyanPhotoTransfer.ManualJoinCard) -> some View {
         let password = card.password ?? ""
+        let fixed = HeyCyanWiFiCredentials.fallbackPassword
         Text("Join the glasses' Wi-Fi")
             .font(.body.weight(.semibold))
-        Text("Open Settings › Wi-Fi, choose this network and enter the password. Then come back to Luna: she continues by herself as soon as the glasses answer.")
+        Text("Settings › Wi-Fi › Other…")
+            .font(.body.weight(.medium))
+        Text("The glasses' network is hidden, so it isn't in the Wi-Fi list: scroll down and tap Other…, then enter exactly this. Come back to Luna afterwards: she continues by herself as soon as the glasses answer.")
             .font(.footnote)
             .foregroundStyle(LunaColor.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
-        LabeledContent("Network") {
+        LabeledContent("Name") {
             Text(card.ssid).font(.body.monospaced()).textSelection(.enabled)
         }
         .accessibilityIdentifier("heycyan.joinCard.network")
+        LabeledContent("Security", value: "WPA2/WPA3 Personal")
         LabeledContent("Password") {
-            Text(password.isEmpty ? "None" : password).font(.body.monospaced()).textSelection(.enabled)
+            Text(password.isEmpty ? fixed : password).font(.body.monospaced()).textSelection(.enabled)
         }
         .accessibilityIdentifier("heycyan.joinCard.password")
         HStack(spacing: 16) {
-            Button(copied ? "Copied" : "Copy password") { copy(password) }
-                .disabled(password.isEmpty)
+            Button(copied == .name ? "Copied" : "Copy name") { copy(card.ssid, as: .name) }
+                .accessibilityIdentifier("heycyan.joinCard.copyName")
+            Button(copied == .password ? "Copied" : "Copy password") { copy(password.isEmpty ? fixed : password, as: .password) }
                 .accessibilityIdentifier("heycyan.joinCard.copy")
+            Spacer(minLength: 0)
+        }
+        .buttonStyle(.borderless)
+        if !password.isEmpty, password != fixed {
+            HStack(spacing: 16) {
+                Text("If that password is refused, use \(fixed).")
+                    .font(.footnote)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(copied == .fixed ? "Copied" : "Copy") { copy(fixed, as: .fixed) }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("heycyan.joinCard.copyFixed")
+            }
+        }
+        HStack(spacing: 16) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }
@@ -87,9 +111,9 @@ struct HeyCyanJoinCard: View {
     }
 
     /// This device only, and gone after five minutes: the network closes long before.
-    private func copy(_ password: String) {
-        UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: password]],
+    private func copy(_ text: String, as what: Copied) {
+        UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: text]],
                                       options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(300)])
-        copied = true
+        copied = what
     }
 }

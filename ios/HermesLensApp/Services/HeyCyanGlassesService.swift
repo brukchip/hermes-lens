@@ -98,6 +98,8 @@ final class HeyCyanGlassesService: NSObject {
     @ObservationIgnored private var addressWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
     /// The Wi-Fi address the glasses reported since the last `enterTransferMode` (event 0x73/08).
     @ObservationIgnored private(set) var reportedWiFiAddress: String?
+    /// When `reportedWiFiAddress` arrived (for the `stage=wifi_ip` trace).
+    @ObservationIgnored private(set) var reportedWiFiAddressAt: ContinuousClock.Instant?
 
     private let serviceUUID = CBUUID(string: HeyCyanUUID.bigDataService)
     private let notifyUUID = CBUUID(string: HeyCyanUUID.bigDataNotify)
@@ -255,6 +257,7 @@ final class HeyCyanGlassesService: NSObject {
     /// `timedOut` when no reply comes, `transferRefused` when the reply has no credentials.
     func enterTransferMode(timeout: Duration) async throws -> HeyCyanWiFiCredentials {
         reportedWiFiAddress = nil
+        reportedWiFiAddressAt = nil
         let id = UUID()
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HeyCyanWiFiCredentials, Error>) in
             do { try send(.enterTransferMode) } catch { continuation.resume(throwing: error); return }
@@ -458,6 +461,7 @@ final class HeyCyanGlassesService: NSObject {
         case .wifiAddress(let address):
             trace("heycyan.transfer", "event=wifi_address ip=\(address)")
             reportedWiFiAddress = address
+            reportedWiFiAddressAt = .now
             let waiters = addressWaiters
             addressWaiters.removeAll()
             for waiter in waiters.values { waiter.resume(returning: address) }
