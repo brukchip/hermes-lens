@@ -207,7 +207,7 @@ final class HeyCyanGlassesService: NSObject {
 
     /// Takes one photo on the glasses and confirms it the way the Mac test tool did: the photo
     /// count before, the command, then the count again until it goes up (about 3 to 9 s).
-    /// The photo stays on the glasses; bringing it to the phone is a later step.
+    /// The photo is stored on the glasses; `HeyCyanPhotoTransfer` brings it to the phone.
     func takePhoto() async throws -> PhotoResult {
         guard !isTakingPhoto else { throw HeyCyanError.busy }
         isTakingPhoto = true
