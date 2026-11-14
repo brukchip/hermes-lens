@@ -53,6 +53,12 @@ final class AppModel {
     /// Why the saved server address can't be used, so a placeholder client is never reported as online.
     @ObservationIgnored private var endpointProblem: String?
     private var glassesService: any GlassesService
+    /// HeyCyan camera glasses (beta). Idle, with no Bluetooth manager or permission prompt,
+    /// until the user picks HeyCyan in Settings.
+    let heyCyan = HeyCyanGlassesService()
+    @ObservationIgnored private var heyCyanButtonTask: Task<Void, Never>?
+    /// The last Photo flow photo was taken but stays on the glasses (HeyCyan step 1).
+    private(set) var lastCaptureKeptOnGlasses = false
 
     init(
         settings: AppSettings? = nil,
@@ -78,6 +84,7 @@ final class AppModel {
         callRecords = await callStore.load()
         notificationAuthorization = await notifications.authorizationStatus()
         rebuildServices()
+        startHeyCyanIfChosen()
         await refreshLensConfiguration()
         await checkConnection()
     }
@@ -287,6 +294,11 @@ final class AppModel {
     /// start, so it gets up to 10 s before falling back to a full photo; a stream that
     /// never started gets no wait at all.
     func captureCallFrame() async throws -> Data {
+        if glassesBrand == .heyCyan {
+            // The photo is taken, but it stays on the glasses in this version: Luna is told so
+            // (by the error's code) instead of being given an image.
+            throw LunaCameraError(code: await takeHeyCyanPhoto().lookCode)
+        }
         let held = await holdGlassesCameraForCall()
         do {
             let image = try await lookThroughCallCamera(held: held)
@@ -333,6 +345,7 @@ final class AppModel {
     /// A call's `record_video`: a short clip saved to the Library. The camera is released
     /// afterwards like after a look, not held until the call ends.
     func recordCallVideo() async -> CaptureArtifact? {
+        guard glassesBrand == .rayBanMeta else { return nil }
         await holdGlassesCameraForCall()
         let artifact = await captureArtifact(kind: .video, request: "Video from a Luna call")
         await releaseCallCameraAfterCapture()
@@ -382,7 +395,7 @@ final class AppModel {
     /// Glasses buttons control the running call (Settings may turn this off). Keeps the
     /// glasses session for the call; `finishGlassesForCall` lets it go.
     func startGlassesGestures(_ handler: @escaping @MainActor @Sendable (GlassesGesture) -> Void) async {
-        guard settings.usesGlassesGestures, !settings.usesMockGlasses,
+        guard settings.usesGlassesGestures, !settings.usesMockGlasses, glassesBrand == .rayBanMeta,
               glassesRegistrationState == .registered else { return }
         glassesIdleRelease?.cancel()
         glassesInCall = true
@@ -463,6 +476,8 @@ final class AppModel {
         kind: VisualCaptureKind,
         request: String
     ) async -> CaptureArtifact? {
+        lastCaptureKeptOnGlasses = false
+        if glassesBrand == .heyCyan { return await captureOnHeyCyan(kind) }
         isWorking = true
         glassesIdleRelease?.cancel()
         defer {
@@ -683,6 +698,7 @@ final class AppModel {
 
     func handleBecameActive() async {
         glassesState = glassesService.state
+        if glassesBrand == .heyCyan { heyCyan.reconnect(to: settings.heyCyanPeripheralID) }
         // A first launch can run before the phone reaches the server: the one configuration
         // fetch failed and live voice stayed off until a manual refresh.
         if !hasServerConfiguration { await refreshLensConfiguration() }
@@ -725,7 +741,7 @@ final class AppModel {
     private func refreshGlassesState() {
         glassesState = glassesService.state
         glassesRegistrationState = glassesService.registrationState
-        if glassesRegistrationState == .registered, !settings.usesMockGlasses {
+        if glassesRegistrationState == .registered, !settings.usesMockGlasses, glassesBrand == .rayBanMeta {
             glassesService.startVoiceLaunch { [weak self] in self?.voiceLaunchRequest = UUID() }
         }
         let info = glassesService.deviceInfo
@@ -735,7 +751,125 @@ final class AppModel {
 
     /// Why the glasses camera cannot be used right now, from what the glasses report;
     /// nil when nothing says no. Unknown states never block.
-    var glassesCameraBlocker: String? { glassesInfo?.cameraBlocker }
+    var glassesCameraBlocker: String? { glassesBrand == .rayBanMeta ? glassesInfo?.cameraBlocker : nil }
+
+    // MARK: Glasses brand (Ray-Ban Meta by default, HeyCyan beta)
+
+    var glassesBrand: GlassesBrand { settings.glassesBrand }
+
+    /// Which glasses, whether they are connected and their battery, whatever the brand.
+    var glassesStatus: GlassesStatus {
+        switch glassesBrand {
+        case .rayBanMeta:
+            GlassesStatus(brand: .rayBanMeta, name: glassesInfo?.model ?? "Ray-Ban Meta",
+                          isConnected: [.connected, .observing, .paused, .ready].contains(glassesState),
+                          battery: glassesInfo?.battery, photosReachPhone: true)
+        case .heyCyan:
+            GlassesStatus(brand: .heyCyan,
+                          name: heyCyan.connectedName ?? settings.heyCyanPeripheralName ?? "HeyCyan glasses",
+                          isConnected: heyCyan.isConnected, battery: heyCyan.batteryPercent,
+                          photosReachPhone: false)
+        }
+    }
+
+    /// Settings › Glasses. Switching closes the other brand's link; the Meta path is untouched
+    /// apart from closing an idle session.
+    func selectGlassesBrand(_ brand: GlassesBrand) {
+        guard brand != settings.glassesBrand else { return }
+        settings.glassesBrand = brand
+        VoiceDiagnosticLog.record("glasses.brand", brand.rawValue)
+        switch brand {
+        case .heyCyan:
+            Task { await disconnectGlassesIfIdle() }
+            startHeyCyanIfChosen()
+        case .rayBanMeta:
+            heyCyan.disconnect()
+        }
+    }
+
+    /// At launch and when HeyCyan is chosen: listen for the assistant button and reconnect to
+    /// the remembered glasses. Nothing happens (no Bluetooth prompt) while Meta is chosen.
+    private func startHeyCyanIfChosen() {
+        guard glassesBrand == .heyCyan else { return }
+        if heyCyanButtonTask == nil {
+            let presses = heyCyan.assistantButtonPresses()
+            heyCyanButtonTask = Task { [weak self] in
+                for await _ in presses { self?.heyCyanAssistantButtonPressed() }
+            }
+        }
+        heyCyan.reconnect(to: settings.heyCyanPeripheralID)
+    }
+
+    /// The assistant button starts a Luna call only when the user turned that on, HeyCyan is the
+    /// chosen brand and Luna is open on screen (never from the background).
+    private func heyCyanAssistantButtonPressed() {
+        guard glassesBrand == .heyCyan, settings.heyCyanButtonStartsCall,
+              UIApplication.shared.applicationState == .active else { return }
+        VoiceDiagnosticLog.record("heycyan.button", "starts_call")
+        voiceLaunchRequest = UUID()
+    }
+
+    /// Why the last HeyCyan connect failed, shown in Settings; nil after a success.
+    private(set) var heyCyanProblem: String?
+
+    /// Connects to glasses picked from the scan list and remembers them.
+    func connectHeyCyan(_ device: HeyCyanGlassesService.FoundDevice) async {
+        heyCyanProblem = nil
+        do {
+            try await heyCyan.connect(to: device.id)
+            settings.heyCyanPeripheralID = device.id
+            settings.heyCyanPeripheralName = device.name
+        } catch {
+            heyCyanProblem = error.localizedDescription
+        }
+    }
+
+    /// Connects to the remembered glasses (Settings' Connect, Home's pill).
+    func connectRememberedHeyCyan() async {
+        guard let id = settings.heyCyanPeripheralID else { return }
+        heyCyanProblem = nil
+        do { try await heyCyan.connect(to: id) } catch { heyCyanProblem = error.localizedDescription }
+    }
+
+    /// Disconnects and forgets the remembered glasses.
+    func forgetHeyCyan() {
+        heyCyan.disconnect()
+        settings.heyCyanPeripheralID = nil
+        settings.heyCyanPeripheralName = nil
+        heyCyanProblem = nil
+    }
+
+    /// Takes one photo on the HeyCyan glasses, reconnecting first if they were remembered.
+    func takeHeyCyanPhoto() async -> HeyCyanPhotoOutcome {
+        if !heyCyan.isConnected, let id = settings.heyCyanPeripheralID {
+            try? await heyCyan.connect(to: id)
+        }
+        guard heyCyan.isConnected else { return .notConnected }
+        do {
+            let result = try await heyCyan.takePhoto()
+            return result.confirmed ? .keptOnGlasses(photosOnGlasses: result.after.photos) : .unconfirmed
+        } catch HeyCyanError.notConnected {
+            return .notConnected
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    /// The Photo and Video flows with HeyCyan glasses: a photo is taken but stays on the glasses,
+    /// so nothing is added to the Library; video is not available yet.
+    private func captureOnHeyCyan(_ kind: VisualCaptureKind) async -> CaptureArtifact? {
+        lastCaptureError = nil
+        guard kind == .photo else {
+            lastCaptureError = "HeyCyan glasses can't record video for Luna yet."
+            return nil
+        }
+        isWorking = true
+        defer { isWorking = false }
+        let outcome = await takeHeyCyanPhoto()
+        if case .keptOnGlasses = outcome { lastCaptureKeptOnGlasses = true }
+        lastCaptureError = outcome.message
+        return nil
+    }
 
     func openGlassesFirmwareUpdate() async {
         do { try await glassesService.openFirmwareUpdate() } catch { errorMessage = "Couldn't open Meta AI. Is it installed?" }

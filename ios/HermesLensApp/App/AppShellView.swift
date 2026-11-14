@@ -339,13 +339,15 @@ struct AppShellView: View {
                 guard model.settings.allowsCameraInCalls else { throw LunaCameraError(code: "camera_off_in_settings") }
                 if let blocker = model.glassesCameraBlocker { throw LunaCameraError(code: blocker) }
                 do { return try await model.captureCallFrame() }
+                catch let error as LunaCameraError { throw error }  // HeyCyan: the photo stays on the glasses
                 catch { throw LunaCameraError(code: "photo_glasses_\(model.glassesState)") }
             },
             recordVideo: { [model] in
                 guard model.settings.allowsCameraInCalls else { throw LunaCameraError(code: "camera_off_in_settings") }
                 if let blocker = model.glassesCameraBlocker { throw LunaCameraError(code: blocker) }
                 guard await model.recordCallVideo() != nil else {
-                    throw LunaCameraError(code: "video_glasses_\(model.glassesState)")
+                    throw LunaCameraError(code: model.glassesBrand == .heyCyan
+                        ? "heycyan_no_video" : "video_glasses_\(model.glassesState)")
                 }
             },
             endCall: { [model] in await model.finishGlassesForCall() }

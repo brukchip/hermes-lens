@@ -16,6 +16,7 @@
 		2BC5D6D568D4B2662BA327B5 /* HermesLensCore in Frameworks */ = {isa = PBXBuildFile; productRef = 87753FCB0443F230D828B5BD /* HermesLensCore */; };
 		30414C1EB5E100B7DC1CB0D2 /* VisualCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7BF2C1C3E940CA0BDFB6D1C /* VisualCaptureView.swift */; };
 		396B095A32087ABA4543D525 /* LunaTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71E8584764314BE2BD7A545D /* LunaTabBar.swift */; };
+		3A2A69347ABD745BBA2711B6 /* GlassesDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D835CB5298C0A470F5F7EC4 /* GlassesDevice.swift */; };
 		4B02D57F3DEF3BD8C0F79787 /* V3HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747C76D0D84325DADB9E9391 /* V3HomeView.swift */; };
 		6E8EC720783260CEE7A6F494 /* AppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D304E09ACD6161AF74919620 /* AppModelTests.swift */; };
 		7139F283CDA78CE6EBADA077 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */; };
@@ -42,6 +43,7 @@
 		CD77373A0364A3C0D06FC231 /* LunaTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11C79ED9DA4900F32CC14A6 /* LunaTheme.swift */; };
 		CD9A349E35C27D3702D0B6EE /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3862CDA35DE0371F81DD0AD3 /* NotificationService.swift */; };
 		D4B32266FBCF42BA78CEB36E /* V3CapabilityLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0950B8E8AC07ECA232E6B79A /* V3CapabilityLabView.swift */; };
+		D63B49707625548CD8EBF2FA /* HeyCyanGlassesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491C3AA044C0367FA4DC2ED6 /* HeyCyanGlassesService.swift */; };
 		D6F18FF886925ADE9F81DD8A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB298775A81348EA43DD23FD /* AppModel.swift */; };
 		DB00B9AE08D4D66D52183A0A /* AudioSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C7C40D499DD3ADFEC934B85 /* AudioSessionCoordinator.swift */; };
 		E05EFED2836BB7BD9F69D831 /* HermesLensCore in Frameworks */ = {isa = PBXBuildFile; productRef = E3756AB6BA06159604B48A47 /* HermesLensCore */; };
@@ -82,12 +84,14 @@
 		0B491815DFACD2EE11C795E8 /* GlassesFrameDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesFrameDecoder.swift; sourceTree = "<group>"; };
 		0E481546E565AA235E3F8BB3 /* MockHermesClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockHermesClient.swift; sourceTree = "<group>"; };
 		16055F7D85D6A16EAB6B57BC /* PersistenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStore.swift; sourceTree = "<group>"; };
+		1D835CB5298C0A470F5F7EC4 /* GlassesDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesDevice.swift; sourceTree = "<group>"; };
 		1F9D0A38DBBF5189FCD11F5A /* ServerConnectionFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectionFields.swift; sourceTree = "<group>"; };
 		247F26BE7D83AB7CBD79BC2A /* LunaComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaComponents.swift; sourceTree = "<group>"; };
 		29A188FB28EFCF18A523C93E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		367869E3632AF943237BC67F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3862CDA35DE0371F81DD0AD3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		444D69CC9D511AE71B18D935 /* CallRecordStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecordStore.swift; sourceTree = "<group>"; };
+		491C3AA044C0367FA4DC2ED6 /* HeyCyanGlassesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeyCyanGlassesService.swift; sourceTree = "<group>"; };
 		502008C0CBA16BD12EFB0B69 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		522B811D21F8B336BF17900F /* PCM16KAudioTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCM16KAudioTap.swift; sourceTree = "<group>"; };
 		58B41C7202FFDE855907D48F /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
@@ -246,8 +250,10 @@
 				7D71DCC032CAC8A7ED3BAE86 /* AudioDiagnosticService.swift */,
 				6C7C40D499DD3ADFEC934B85 /* AudioSessionCoordinator.swift */,
 				444D69CC9D511AE71B18D935 /* CallRecordStore.swift */,
+				1D835CB5298C0A470F5F7EC4 /* GlassesDevice.swift */,
 				0B491815DFACD2EE11C795E8 /* GlassesFrameDecoder.swift */,
 				AFF6CB4A818EF5AC2096FD54 /* GlassesService.swift */,
+				491C3AA044C0367FA4DC2ED6 /* HeyCyanGlassesService.swift */,
 				6143E0F284A8C7AEF28879E4 /* LunaCall.swift */,
 				97A6A210FD95373BB8753D26 /* LunaNativeSession.swift */,
 				0E481546E565AA235E3F8BB3 /* MockHermesClient.swift */,
@@ -497,9 +503,11 @@
 				DB00B9AE08D4D66D52183A0A /* AudioSessionCoordinator.swift in Sources */,
 				083B09679B49A8959921FEDE /* CallRecordStore.swift in Sources */,
 				B8057CE5B355B0D53E1FE9B2 /* ContactEditorSheet.swift in Sources */,
+				3A2A69347ABD745BBA2711B6 /* GlassesDevice.swift in Sources */,
 				0B2EBFB91D890B9055400E71 /* GlassesFrameDecoder.swift in Sources */,
 				F97D25B6A731FD76DF27DEFA /* GlassesService.swift in Sources */,
 				2603D11B29BA31BB59CFC08D /* HermesLensApp.swift in Sources */,
+				D63B49707625548CD8EBF2FA /* HeyCyanGlassesService.swift in Sources */,
 				8619DAE3D7E789CC08D6D207 /* LibraryFeed.swift in Sources */,
 				B34E24479686DCC9996BBA1C /* LibraryView.swift in Sources */,
 				F7942DB2C656BC6C954AA4CB /* LunaCall.swift in Sources */,

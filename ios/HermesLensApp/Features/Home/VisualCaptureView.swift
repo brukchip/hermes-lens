@@ -296,10 +296,13 @@ struct VisualCaptureView: View {
 
     private var phaseTitle: String {
         switch phase {
-        case .ready: [.connected, .observing, .ready].contains(model.glassesState) ? "Glasses ready" : "I'll connect your glasses first"
+        case .ready:
+            (model.glassesBrand == .heyCyan ? model.heyCyan.isConnected
+                : [.connected, .observing, .ready].contains(model.glassesState))
+                ? "Glasses ready" : "I'll connect your glasses first"
         case .capturing: kind == .photo ? "Taking the photo" : "Recording six seconds"
         case .complete: "Saved"
-        case .captureFailed: "That didn't work"
+        case .captureFailed: model.lastCaptureKeptOnGlasses ? "Saved on your glasses" : "That didn't work"
         }
     }
 
@@ -311,7 +314,8 @@ struct VisualCaptureView: View {
                 : "One photo, saved on this iPhone first."
         case .capturing: "Keep the glasses on and pointed at it."
         case .complete: "It's in your Library on this iPhone."
-        case .captureFailed: "Nothing was saved or sent."
+        case .captureFailed:
+            model.lastCaptureKeptOnGlasses ? "Nothing was added to this iPhone yet." : "Nothing was saved or sent."
         }
     }
 

@@ -17,6 +17,10 @@ final class AppSettings {
         static let onboardingComplete = "settings.onboardingComplete"
         static let compressedGlassesStream = GlassesStreamPreferences.compressedKey
         static let glassesGestures = "settings.glassesGestures"
+        static let glassesBrand = "settings.glassesBrand"
+        static let heyCyanPeripheral = "settings.heyCyan.peripheral"
+        static let heyCyanName = "settings.heyCyan.name"
+        static let heyCyanButtonStartsCall = "settings.heyCyan.buttonStartsCall"
     }
 
     private let defaults: UserDefaults
@@ -41,6 +45,19 @@ final class AppSettings {
     /// Raw 720p may not fit the Bluetooth link, so the glasses lower its quality.
     var usesCompressedGlassesStream: Bool {
         didSet { defaults.set(usesCompressedGlassesStream, forKey: Key.compressedGlassesStream) }
+    }
+    /// Which glasses Luna uses; Ray-Ban Meta unless the user picks HeyCyan (beta).
+    var glassesBrand: GlassesBrand { didSet { defaults.set(glassesBrand.rawValue, forKey: Key.glassesBrand) } }
+    /// The chosen HeyCyan glasses: the iPhone's own Bluetooth identifier for them (not the
+    /// glasses' address). Never logged.
+    var heyCyanPeripheralID: UUID? {
+        didSet { defaults.set(heyCyanPeripheralID?.uuidString, forKey: Key.heyCyanPeripheral) }
+    }
+    /// Their advertised name, shown in Settings while they are not connected. Never logged.
+    var heyCyanPeripheralName: String? { didSet { defaults.set(heyCyanPeripheralName, forKey: Key.heyCyanName) } }
+    /// The HeyCyan assistant button starts a Luna call while the app is open. Off by default.
+    var heyCyanButtonStartsCall: Bool {
+        didSet { defaults.set(heyCyanButtonStartsCall, forKey: Key.heyCyanButtonStartsCall) }
     }
     let deviceID: UUID
     var accessToken: String
@@ -71,6 +88,10 @@ final class AppSettings {
         hasCompletedOnboarding = defaults.bool(forKey: Key.onboardingComplete)
         usesCompressedGlassesStream = defaults.bool(forKey: Key.compressedGlassesStream)
         usesGlassesGestures = defaults.object(forKey: Key.glassesGestures) as? Bool ?? true
+        glassesBrand = defaults.string(forKey: Key.glassesBrand).flatMap(GlassesBrand.init(rawValue:)) ?? .rayBanMeta
+        heyCyanPeripheralID = defaults.string(forKey: Key.heyCyanPeripheral).flatMap(UUID.init(uuidString:))
+        heyCyanPeripheralName = defaults.string(forKey: Key.heyCyanName)
+        heyCyanButtonStartsCall = defaults.bool(forKey: Key.heyCyanButtonStartsCall)
         bridgeURL = defaults.string(forKey: Key.bridgeURL) ?? HermesAppEnvironment.defaultBridgeURL
         sessionKey = defaults.string(forKey: Key.sessionKey) ?? "hermes-lens"
 
