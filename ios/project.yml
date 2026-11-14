@@ -67,7 +67,7 @@ targets:
             OptOut: true
           CrashReporting:
             OptOut: true
-        NSBluetoothAlwaysUsageDescription: Luna uses Bluetooth to connect to your Meta glasses.
+        NSBluetoothAlwaysUsageDescription: Luna uses Bluetooth to connect to your glasses.
         NSMicrophoneUsageDescription: Luna listens only while you are talking to her, after you tap Talk to Luna.
         NSLocalNetworkUsageDescription: Luna uses a private local connection to receive photos and video from your Meta glasses.
         NSContactsUsageDescription: Luna fills in a new contact from a business card; you check it and tap Done to save it.

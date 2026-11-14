@@ -118,6 +118,34 @@ is offered only when `voice.nativeAudioEnabled` is true and
 v1/lens/realtime/calls`, `POST v1/lens/native/tools` and `POST
 v1/lens/native/approvals`.
 
+## HeyCyan glasses (beta)
+
+Cheap HeyCyan camera glasses (the AM01 family, such as the L802 and M01) can be chosen
+instead of Ray-Ban Meta in **You › Glasses**. Ray-Ban Meta stays the default and works as
+before. The app talks to HeyCyan glasses directly over Bluetooth LE, without the vendor's
+app, SDK or cloud.
+
+What works in this first version:
+
+- **Scan** lists every named Bluetooth device nearby (`M01…` and `L 802…` names first),
+  because the glasses do not advertise their services. Pick yours to connect; the app
+  remembers it and reconnects when you open the app.
+- **Battery** as the glasses report it, and **Forget** to disconnect and forget them.
+- **Take a test photo** takes a photo on the glasses and confirms it by their photo count.
+- **Look** and the **Photo** button take the photo on the glasses, and Luna says plainly
+  that it stays there for now. She does not describe it.
+- Optional, off by default: the glasses' assistant button starts a Luna call while the app
+  is open on screen.
+
+Not yet: bringing photos to the phone (they download over the glasses' own Wi-Fi, planned
+next), video, and voice through the glasses' microphone. Calls use the iPhone's current audio route.
+
+The app can send only two commands to these glasses: take a photo, and count the media on
+them. Restart, factory reset, firmware and Wi-Fi commands cannot be built.
+
+**These glasses accept Bluetooth commands from anyone nearby, with no pairing.** Use them
+for testing, not for anything private.
+
 ## Demo mode
 
 To try the interface without a server or glasses, tap the version number at the

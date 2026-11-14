@@ -64,7 +64,7 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Luna uses Bluetooth to connect to your Meta glasses.</string>
+	<string>Luna uses Bluetooth to connect to your glasses.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_bonjour._tcp</string>
