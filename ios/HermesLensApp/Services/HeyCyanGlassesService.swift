@@ -266,11 +266,6 @@ final class HeyCyanGlassesService: NSObject {
         }
     }
 
-    /// The "proceed" some firmware waits for before it reports its Wi-Fi address.
-    func sendTransferProceed() throws {
-        try send(.transferProceed)
-    }
-
     /// Closes the glasses' Wi-Fi. Never throws: it runs on every path after a transfer attempt.
     func exitTransferMode() {
         do { try send(.exitTransferMode) } catch { trace("heycyan.transfer", "event=exit_not_sent reason=not_connected") }
@@ -458,8 +453,6 @@ final class HeyCyanGlassesService: NSObject {
             let waiters = credentialWaiters
             credentialWaiters.removeAll()
             for waiter in waiters.values { waiter.resume(throwing: HeyCyanError.transferRefused) }
-        case .transferProceedEcho:
-            trace("heycyan.transfer", "event=proceed_echo")
         case .exitTransferReply:
             trace("heycyan.transfer", "event=exit_reply")
         case .wifiAddress(let address):

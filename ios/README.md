@@ -139,9 +139,10 @@ What works:
   Wi-Fi: the glasses open a Wi-Fi network for a moment, the iPhone joins it, downloads the
   newest photo over plain HTTP and returns to its usual network. The photo is saved on this
   iPhone first, like a Meta photo. This transfer is a beta built from community notes.
-  - **Default build:** a card shows the glasses' network name and password. Join it in
-    Settings › Wi-Fi and come back; Luna continues as soon as the glasses answer (she
-    waits up to 90 seconds), then says you can go back to your usual Wi-Fi.
+  - **Default build:** a card shows the glasses' network name and password. Their hotspot
+    is hidden, so join it in Settings › Wi-Fi › Other… (exact name, WPA2/WPA3 Personal, the
+    password; if it is refused, `123456789`) and come back. Luna continues as soon as the
+    glasses answer (she waits up to 3 minutes), then says you can go back to your usual Wi-Fi.
   - **With automatic joining** (see below): the iPhone asks once, "Join network…?".
 - **Look** in a call: with automatic joining, the photo comes over and Luna describes it
   (or gives up after about 25 seconds). In the default build a call can't wait for you to
@@ -153,7 +154,7 @@ Not yet: video and voice through the glasses' microphone. Calls use the iPhone's
 audio route.
 
 The app can send only these commands to the glasses: take a photo, count the media, read
-the battery, and open, confirm and close their Wi-Fi for a photo download. Restart, factory
+the battery, and open and close their Wi-Fi for a photo download. Restart, factory
 reset and firmware commands cannot be built. While the glasses' Wi-Fi is joined, the iPhone
 is off your usual Wi-Fi for a few seconds.
 

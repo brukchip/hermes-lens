@@ -80,13 +80,12 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
 
 @Test func onlyTheAllowlistedCommandsCanBeBuilt() {
     #expect(HeyCyanCommand.allCases == [
-        .takePhoto, .mediaCount, .batteryLevel, .enterTransferMode, .transferProceed, .exitTransferMode,
+        .takePhoto, .mediaCount, .batteryLevel, .enterTransferMode, .exitTransferMode,
     ])
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x01]) == .takePhoto)
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x04]) == .mediaCount)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00, 0x00]) == .batteryLevel)
-    #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x04]) == .enterTransferMode)
-    #expect(HeyCyanCommand(command: 0x45, payload: [0x04, 0x01]) == .transferProceed)
+    #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x04, 0x02]) == .enterTransferMode)
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x09]) == .exitTransferMode)
 }
 
@@ -149,15 +148,17 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
             }
         }
     }
-    // takePhoto is reached twice ([2,1,x] and [x,1,1] with x = 1/2), mediaCount once, and the
-    // transfer mode's enter and exit once each ([2,1,4] and [2,1,9]).
-    #expect(Set(accepted.map(\.label)) == ["take_photo", "media_count", "enter_transfer_mode", "exit_transfer_mode"])
-    #expect(accepted.filter { $0 == .enterTransferMode }.count == 1)
+    // takePhoto is reached twice ([2,1,x] and [x,1,1] with x = 1/2), mediaCount once, and
+    // exit transfer once ([2,1,9]). Enter transfer needs four bytes ([2,1,4,2]).
+    #expect(Set(accepted.map(\.label)) == ["take_photo", "media_count", "exit_transfer_mode"])
     #expect(accepted.filter { $0 == .exitTransferMode }.count == 1)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00]) == nil)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00, 0x01]) == nil)
-    #expect(HeyCyanCommand(command: 0x45, payload: [0x04, 0x00]) == nil)
-    #expect(HeyCyanCommand(command: 0x45, payload: [0x04, 0x01, 0x00]) == nil)
+    // 0x45 is the AI voice heartbeat in the vendor header, not a transfer "proceed".
+    #expect(HeyCyanCommand(command: 0x45, payload: [0x04, 0x01]) == nil)
+    // Only the hotspot variant of transfer mode: not the Android Wi-Fi Direct ones.
+    #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x04]) == nil)
+    #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x04, 0x01]) == nil)
     #expect(accepted.filter { $0 == .mediaCount }.count == 1)
 }
 
@@ -326,9 +327,10 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
             UInt8(secret.count & 0xFF), UInt8(secret.count >> 8)] + name + secret
 }
 
-@Test func theTransferFramesAreTheDocumentedBytes() {
-    #expect(HeyCyanCommand.enterTransferMode.bytes == hex("bc410300d053020104"))
-    #expect(HeyCyanCommand.transferProceed.bytes == hex("bc450200c2b00401"))
+@Test func theTransferFramesMatchTheOfficialAppsHotspotFrame() {
+    // Byte for byte the frame the official iPhone app sends (captured), which made the L802
+    // open its own hotspot.
+    #expect(HeyCyanCommand.enterTransferMode.bytes == hex("bc410400d35d02010402"))
     #expect(HeyCyanCommand.exitTransferMode.bytes == hex("bc4103001196020109"))
 }
 
@@ -340,6 +342,20 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     #expect(frames.map(HeyCyanEvent.init) == [
         .transferCredentials(HeyCyanWiFiCredentials(ssid: "Glasses_1234", password: "example-pass")),
     ])
+}
+
+@Test func theReportedPasswordIsTriedFirstThenTheFixedOne() {
+    #expect(HeyCyanWiFiCredentials(ssid: "Glasses_1234", password: "abcd12345").passwordsToTry == ["abcd12345", "123456789"])
+    #expect(HeyCyanWiFiCredentials(ssid: "Glasses_1234", password: "123456789").passwordsToTry == ["123456789"])
+    #expect(HeyCyanWiFiCredentials(ssid: "Glasses_1234", password: "").passwordsToTry == ["123456789"])
+}
+
+@Test func aReplyWithWorkType01ToTheHotspotRequestStillGivesCredentials() {
+    // The L802 answered `02 01 04 01 …` to `02 01 04 02`; the network name has a space in it.
+    let reply = transferReply(ssid: "Glasses 0A1B2C3D4E5F", password: "abcd12345", status: 0x01)
+    #expect(HeyCyanWiFiCredentials(controlPayload: reply) == HeyCyanWiFiCredentials(ssid: "Glasses 0A1B2C3D4E5F", password: "abcd12345"))
+    let hotspot = transferReply(ssid: "Glasses 0A1B2C3D4E5F", password: "abcd12345", status: 0x02)
+    #expect(HeyCyanWiFiCredentials(controlPayload: hotspot)?.ssid == "Glasses 0A1B2C3D4E5F")
 }
 
 @Test func anOpenGlassesNetworkHasAnEmptyPassword() {
@@ -368,16 +384,17 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     }
 }
 
-@Test func theProceedEchoTheExitReplyAndTheWiFiAddressDecode() {
+@Test func theExitReplyTheWiFiAddressAndTheErrorDecode() {
     var parser = HeyCyanFrameParser()
-    let echo = HeyCyanFrame(command: 0x45, payload: [0x04, 0x01]).encoded
+    let heartbeat = HeyCyanFrame(command: 0x45, payload: [0x04, 0x01]).encoded
     let exit = HeyCyanFrame(command: 0x41, payload: [0x02, 0x01, 0x09, 0x01]).encoded
-    let address = HeyCyanFrame(command: 0x73, payload: [0x08, 0xC0, 0xA8, 0x31, 0x0E]).encoded
+    let address = HeyCyanFrame(command: 0x73, payload: [0x08, 0xC0, 0xA8, 0x1F, 0x01]).encoded
     let zero = HeyCyanFrame(command: 0x73, payload: [0x08, 0, 0, 0, 0]).encoded
     let short = HeyCyanFrame(command: 0x73, payload: [0x08, 0xC0, 0xA8]).encoded
-    let wifiError = HeyCyanFrame(command: 0x73, payload: [0x09, 0xFF]).encoded
-    #expect(parser.push(echo + exit + address + zero + short + wifiError).map(HeyCyanEvent.init) == [
-        .transferProceedEcho, .exitTransferReply, .wifiAddress("192.168.49.14"),
+    // Seen on the L802 about 20 s into transfer mode: `09 ff 02`.
+    let wifiError = HeyCyanFrame(command: 0x73, payload: [0x09, 0xFF, 0x02]).encoded
+    #expect(parser.push(heartbeat + exit + address + zero + short + wifiError).map(HeyCyanEvent.init) == [
+        .unknown(command: 0x45, byteCount: 2), .exitTransferReply, .wifiAddress("192.168.31.1"),
         .otherEvent(type: 0x08), .otherEvent(type: 0x08), .wifiError(code: 255),
     ])
 }
@@ -397,9 +414,13 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
 
 @Test func candidatesPutTheReportedAddressFirstThenTheGatewayThenCommonOnes() {
     #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.49.14", gateway: "192.168.49.1")
-        == ["192.168.49.14", "192.168.49.1", "192.168.43.1", "192.168.4.1", "10.0.0.1", "192.168.1.1"])
-    #expect(HeyCyanGlassesAddress.candidates(reported: nil, gateway: "172.20.10.1").prefix(2) == ["172.20.10.1", "192.168.49.1"])
-    #expect(HeyCyanGlassesAddress.candidates(reported: "0.0.0.0", gateway: nil) == HeyCyanGlassesAddress.commonCandidates)
+        == ["192.168.49.14", "192.168.31.1", "192.168.49.1", "192.168.43.1", "192.168.4.1", "10.0.0.1", "192.168.1.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.31.1", gateway: "192.168.31.1").prefix(2)
+        == ["192.168.31.1", "192.168.49.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: nil, gateway: "172.20.10.1").prefix(3)
+        == ["192.168.31.1", "172.20.10.1", "192.168.49.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: "0.0.0.0", gateway: nil)
+        == ["192.168.31.1"] + HeyCyanGlassesAddress.commonCandidates)
 }
 
 @Test func fileURLsArePlainHTTPUnderFiles() {
@@ -443,12 +464,12 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: false) == .keepOnGlasses)
     #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: true) == .automaticJoin(budgetSeconds: 25))
     #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: true) == .automaticJoin(budgetSeconds: 45))
-    #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: false) == .manualJoin(budgetSeconds: 130))
-    // The manual budget covers the whole 90 s wait plus the photo and the download.
+    #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: false) == .manualJoin(budgetSeconds: 220))
+    // The manual budget covers the whole 3-minute wait plus the photo and the download.
     #expect(Double(HeyCyanFetchPlan.manualBudgetSeconds) > HeyCyanManualJoin.maximumWait + 30)
 }
 
-@Test func theManualJoinCardPollsEveryOneAndAHalfSecondsForNinetySeconds() {
+@Test func theManualJoinCardPollsEveryOneAndAHalfSecondsForThreeMinutes() {
     var join = HeyCyanManualJoin(startedAt: 100)
     var now = 100.0
     while join.shouldPoll(at: now) {
@@ -457,9 +478,9 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
         join.recordPoll(answered: false, at: now)
         now += join.delayBeforeNextPoll(pollStartedAt: pollStarted, now: now)
     }
-    // Polls start at 0, 1.5, … 88.5 s: 60 of them. The last ends before 90 s, so the loop stops
-    // on time rather than on an answer, and ending the card then gives up.
-    #expect(join.polls == 60)
+    // Polls start at 0, 1.5, … 178.5 s: 120 of them. The last ends before 180 s, so the loop
+    // stops on time rather than on an answer, and ending the card then gives up.
+    #expect(join.polls == 120)
     #expect(join.phase == .waitingForJoin)
     #expect(!join.shouldPoll(at: now))
     join.end()
@@ -469,13 +490,13 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     #expect(HeyCyanManualJoin.probeTimeout < HeyCyanManualJoin.pollInterval)
 }
 
-@Test func anUnansweredPollAtNinetySecondsGivesUp() {
+@Test func anUnansweredPollAtThreeMinutesGivesUp() {
     var join = HeyCyanManualJoin(startedAt: 0)
-    join.recordPoll(answered: false, at: 89.9)
+    join.recordPoll(answered: false, at: 179.9)
     #expect(join.phase == .waitingForJoin)
-    join.recordPoll(answered: false, at: 90)
+    join.recordPoll(answered: false, at: 180)
     #expect(join.phase == .gaveUp)
-    join.recordPoll(answered: true, at: 91)
+    join.recordPoll(answered: true, at: 181)
     #expect(join.phase == .gaveUp)
     #expect(join.polls == 2)
 }

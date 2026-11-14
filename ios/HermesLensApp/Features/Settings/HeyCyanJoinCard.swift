@@ -62,7 +62,7 @@ struct HeyCyanJoinCard: View {
         Text("Open Settings shows Luna's own page: tap Settings at the top left, then Wi-Fi.")
             .font(.caption)
             .foregroundStyle(LunaColor.secondaryText)
-        progress("Waiting for the glasses on Wi-Fi (up to 90 seconds)…")
+        progress("Waiting for the glasses on Wi-Fi (up to 3 minutes)…")
     }
 
     private func progress(_ text: String) -> some View {

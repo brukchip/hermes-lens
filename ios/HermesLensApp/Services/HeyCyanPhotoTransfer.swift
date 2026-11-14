@@ -7,13 +7,14 @@ import UIKit
 /// Takes a photo on HeyCyan glasses and brings it to this iPhone, beta.
 ///
 /// The documented flow (community notes; each stage is traced as `heycyan.transfer stage=…`):
-/// 1. Bluetooth: transfer mode (`0x41 02 01 04`). The reply holds the glasses' own Wi-Fi name
-///    and password.
-/// 2. Bluetooth: "proceed" (`0x45 04 01`). Some firmware then reports its Wi-Fi address.
+/// 1. Bluetooth: hotspot transfer mode (`0x41 02 01 04 02`, as the official iPhone app sends
+///    it). The reply holds the glasses' own Wi-Fi name and password; about 8 s later the
+///    glasses report their address (event 0x73/08, 192.168.31.1 on the L802).
+/// 2. (No step: `0x45` is the AI voice heartbeat, not a "proceed".)
 /// 3. The iPhone joins that network. With the Hotspot Configuration entitlement (build flag
 ///    `HERMES_HOTSPOT_JOIN`, paid developer teams) the app joins it itself: one system prompt,
 ///    join once. Without it the app shows a card with the network's name and password, the
-///    user joins it in Settings › Wi-Fi, and the app polls until the glasses answer (90 s).
+///    user joins it in Settings › Wi-Fi, and the app polls until the glasses answer (3 minutes).
 ///    A look in a call has no time for that, so without the entitlement it keeps the photo on
 ///    the glasses (`HeyCyanFetchPlan`).
 /// 4. Plain HTTP: `http://<glasses>/files/media.config` lists the files; the newest JPEG is
@@ -182,14 +183,6 @@ final class HeyCyanPhotoTransfer {
         }
         trace("stage=credentials ms=\(ms(since: stageStart)) result=ok has_password=\(!credentials.password.isEmpty)")
 
-        // 2. Proceed: some firmware reports its Wi-Fi address only after this.
-        do {
-            try glasses.sendTransferProceed()
-            trace("stage=proceed ms=0 result=sent")
-        } catch {
-            trace("stage=proceed ms=0 result=not_connected")
-            throw .disconnected
-        }
         try checkTime(deadline, need: .seconds(6))
 
         let found: Found
@@ -262,7 +255,7 @@ final class HeyCyanPhotoTransfer {
     // MARK: The manual join card
 
     /// Steps 3–4 without the entitlement: shows the card and asks every candidate address for
-    /// `media.config` every 1.5 s for up to 90 s (`HeyCyanManualJoin`). Background time is
+    /// `media.config` every 1.5 s for up to 3 minutes (`HeyCyanManualJoin`). Background time is
     /// requested so polling can go on for a while when the user switches to Settings.
     private func waitForManualJoin(_ credentials: HeyCyanWiFiCredentials,
                                    deadline: ContinuousClock.Instant) async throws(HeyCyanTransferFailure) -> Found {
@@ -518,7 +511,7 @@ enum HeyCyanTransferFailure: Error, Equatable {
     case downloadFailed
     case outOfTime
     case cancelled
-    /// The manual join card waited 90 s and the glasses never answered.
+    /// The manual join card waited 3 minutes and the glasses never answered.
     case manualJoinTimedOut
     /// The user tapped Stop on the manual join card.
     case stopped
@@ -540,7 +533,7 @@ enum HeyCyanTransferFailure: Error, Equatable {
         case .downloadFailed: "the download didn't finish."
         case .outOfTime: "it took too long."
         case .cancelled: "it was stopped."
-        case .manualJoinTimedOut: "the glasses didn't answer on their Wi-Fi within 90 seconds."
+        case .manualJoinTimedOut: "the glasses didn't answer on their Wi-Fi within 3 minutes."
         case .stopped: "you stopped it."
         }
     }

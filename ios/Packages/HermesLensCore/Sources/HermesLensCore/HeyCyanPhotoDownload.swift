@@ -7,6 +7,10 @@ import Foundation
 
 /// Where the glasses' HTTP server may be.
 public enum HeyCyanGlassesAddress {
+    /// The address the L802 reported for its own hotspot (event 0x73/08, `c0 a8 1f 01`). Tried
+    /// right after a reported address.
+    public static let knownGlassesAddress = "192.168.31.1"
+
     /// Tried when the glasses never report their address: common addresses of a device that
     /// runs its own network (Wi-Fi Direct groups, Android-style hotspots, small access points).
     public static let commonCandidates = ["192.168.49.1", "192.168.43.1", "192.168.4.1", "10.0.0.1", "192.168.1.1"]
@@ -31,11 +35,12 @@ public enum HeyCyanGlassesAddress {
         return isUsableIPv4(result) ? result : nil
     }
 
-    /// The addresses to try, in order: what the glasses reported, the joined network's gateway,
-    /// then `commonCandidates`. Unusable and repeated addresses are left out.
+    /// The addresses to try, in order: what the glasses reported, `knownGlassesAddress`, the
+    /// joined network's gateway, then `commonCandidates`. Unusable and repeated addresses are
+    /// left out.
     public static func candidates(reported: String?, gateway: String?) -> [String] {
         var result: [String] = []
-        for address in [reported, gateway].compactMap({ $0 }) + commonCandidates
+        for address in [reported, knownGlassesAddress, gateway].compactMap({ $0 }) + commonCandidates
         where isUsableIPv4(address) && !result.contains(address) {
             result.append(address)
         }
@@ -155,8 +160,9 @@ public enum HeyCyanFetchPlan: Equatable, Sendable {
 
     public static let callBudgetSeconds = 25
     public static let automaticBudgetSeconds = 45
-    /// The photo (up to ~10 s), the credentials (up to 6 s), the 90 s join wait and the download.
-    public static let manualBudgetSeconds = 130
+    /// The photo (up to ~10 s), the credentials (up to 6 s), the 3-minute join wait and the
+    /// download.
+    public static let manualBudgetSeconds = 220
 
     public static func plan(for context: Context, automaticJoinAvailable: Bool) -> HeyCyanFetchPlan {
         switch (context, automaticJoinAvailable) {
@@ -170,6 +176,8 @@ public enum HeyCyanFetchPlan: Equatable, Sendable {
 
 /// The manual join card: the app shows the glasses' Wi-Fi name and password and asks the
 /// glasses' HTTP server every `pollInterval` until it answers or `maximumWait` has passed.
+/// The glasses' hotspot is hidden, so the user types its name in Settings › Wi-Fi › Other…:
+/// that takes a while, hence 3 minutes.
 /// Times are seconds on one monotonic clock.
 public struct HeyCyanManualJoin: Equatable, Sendable {
     public enum Phase: Equatable, Sendable {
@@ -186,7 +194,7 @@ public struct HeyCyanManualJoin: Equatable, Sendable {
     public static let pollInterval: TimeInterval = 1.5
     /// Each poll's HTTP timeout: shorter than the interval, so polls never pile up.
     public static let probeTimeout: TimeInterval = 1.2
-    public static let maximumWait: TimeInterval = 90
+    public static let maximumWait: TimeInterval = 180
 
     public let startedAt: TimeInterval
     public private(set) var phase: Phase = .waitingForJoin

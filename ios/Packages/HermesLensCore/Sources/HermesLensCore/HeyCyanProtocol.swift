@@ -133,24 +133,23 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
     /// Battery level and charging state (read-only). The glasses also report the level on their
     /// own now and then (event 0x73, type 0x05), but too rarely to show it reliably.
     case batteryLevel
-    /// Glasses control: open the glasses' own Wi-Fi network for a photo download ("transfer
-    /// mode"). The reply carries that network's name and password (`HeyCyanWiFiCredentials`).
+    /// Glasses control: open the glasses' own Wi-Fi hotspot for a photo download ("transfer
+    /// mode", `02 01 04 02`). The trailing `02` is what the official iPhone app sends: the
+    /// glasses host a hidden WPA2 network. (`02 01 04` alone is the Android Wi-Fi Direct flow,
+    /// where the phone hosts the network; it never opened anything an iPhone can join.) The
+    /// reply carries the network's name and password (`HeyCyanWiFiCredentials`); about 8 s
+    /// later the glasses report their address (event 0x73, type 0x08).
     case enterTransferMode
-    /// "Proceed" after the credentials, wanted by some firmware: the glasses echo it, then
-    /// report their Wi-Fi address (event 0x73, type 0x08).
-    case transferProceed
     /// Glasses control: close the glasses' Wi-Fi again. Always sent after a download attempt.
     case exitTransferMode
 
     static let glassesControl: UInt8 = 0x41
     static let syncBattery: UInt8 = 0x42
-    static let transferProceedCommand: UInt8 = 0x45
 
     var command: UInt8 {
         switch self {
         case .takePhoto, .mediaCount, .enterTransferMode, .exitTransferMode: Self.glassesControl
         case .batteryLevel: Self.syncBattery
-        case .transferProceed: Self.transferProceedCommand
         }
     }
 
@@ -159,8 +158,7 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         case .takePhoto: [0x02, 0x01, 0x01]
         case .mediaCount: [0x02, 0x04]
         case .batteryLevel: [0x00, 0x00]
-        case .enterTransferMode: [0x02, 0x01, 0x04]
-        case .transferProceed: [0x04, 0x01]
+        case .enterTransferMode: [0x02, 0x01, 0x04, 0x02]
         case .exitTransferMode: [0x02, 0x01, 0x09]
         }
     }
@@ -183,7 +181,6 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         case .mediaCount: "media_count"
         case .batteryLevel: "battery_level"
         case .enterTransferMode: "enter_transfer_mode"
-        case .transferProceed: "transfer_proceed"
         case .exitTransferMode: "exit_transfer_mode"
         }
     }
@@ -203,7 +200,8 @@ public struct HeyCyanMediaCount: Equatable, Sendable {
 }
 
 /// The glasses' own Wi-Fi network, from the reply to `HeyCyanCommand.enterTransferMode`:
-/// payload `02 01 04 <status> <name length UInt16 LE> <password length UInt16 LE> <name> <password>`.
+/// payload `02 01 04 <work type> <name length UInt16 LE> <password length UInt16 LE> <name> <password>`.
+/// The L802 answered work type `01` to a `02` request; any work type is accepted.
 ///
 /// The password is a secret: `description` never shows it (or the name), so printing or
 /// tracing a value cannot leak it.
@@ -214,6 +212,18 @@ public struct HeyCyanWiFiCredentials: Equatable, Sendable, CustomStringConvertib
     public init(ssid: String, password: String) {
         self.ssid = ssid
         self.password = password
+    }
+
+    /// Community notes report that the firmware may send a wrong password and that the real
+    /// one is this fixed value. Tried (and shown) after the reported one.
+    public static let fallbackPassword = "123456789"
+
+    /// The passwords to try, in order: the reported one, then `fallbackPassword`. Repeats and an
+    /// empty reported password are left out.
+    public var passwordsToTry: [String] {
+        [password, Self.fallbackPassword].reduce(into: [String]()) { list, candidate in
+            if !candidate.isEmpty, !list.contains(candidate) { list.append(candidate) }
+        }
     }
 
     /// 802.11 limits: a network name has 1–32 bytes, a WPA key at most 64 characters.
@@ -272,8 +282,6 @@ public enum HeyCyanEvent: Equatable, Sendable {
     case transferCredentials(HeyCyanWiFiCredentials)
     /// A transfer-mode reply without usable credentials (refused, or a format not understood).
     case transferModeReply(byteCount: Int)
-    /// The glasses echoed `HeyCyanCommand.transferProceed`.
-    case transferProceedEcho
     /// Reply to `HeyCyanCommand.exitTransferMode`.
     case exitTransferReply
     /// The glasses' Wi-Fi address during transfer mode (event 0x73, type 0x08: four IPv4 bytes).
@@ -325,8 +333,6 @@ public enum HeyCyanEvent: Equatable, Sendable {
             } else {
                 self = .controlReply(byteCount: p.count)
             }
-        case HeyCyanCommand.transferProceedCommand:
-            self = .transferProceedEcho
         default:
             self = .unknown(command: frame.command, byteCount: p.count)
         }
