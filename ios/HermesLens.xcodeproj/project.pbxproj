@@ -43,6 +43,7 @@
 		CD77373A0364A3C0D06FC231 /* LunaTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11C79ED9DA4900F32CC14A6 /* LunaTheme.swift */; };
 		CD9A349E35C27D3702D0B6EE /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3862CDA35DE0371F81DD0AD3 /* NotificationService.swift */; };
 		D4B32266FBCF42BA78CEB36E /* V3CapabilityLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0950B8E8AC07ECA232E6B79A /* V3CapabilityLabView.swift */; };
+		D548FAF2CCE14B5D9588CA9E /* HeyCyanSettingsRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A5D85351AB84C0F937F5D4 /* HeyCyanSettingsRows.swift */; };
 		D63B49707625548CD8EBF2FA /* HeyCyanGlassesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491C3AA044C0367FA4DC2ED6 /* HeyCyanGlassesService.swift */; };
 		D6F18FF886925ADE9F81DD8A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB298775A81348EA43DD23FD /* AppModel.swift */; };
 		DB00B9AE08D4D66D52183A0A /* AudioSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C7C40D499DD3ADFEC934B85 /* AudioSessionCoordinator.swift */; };
@@ -123,6 +124,7 @@
 		E6E011FBEA20DBB3D2F2B3E4 /* LunaCallPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaCallPanel.swift; sourceTree = "<group>"; };
 		E7BF2C1C3E940CA0BDFB6D1C /* VisualCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualCaptureView.swift; sourceTree = "<group>"; };
 		E94CE86745C5F88752E4BCB4 /* HermesLensCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HermesLensCore; path = Packages/HermesLensCore; sourceTree = SOURCE_ROOT; };
+		E9A5D85351AB84C0F937F5D4 /* HeyCyanSettingsRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeyCyanSettingsRows.swift; sourceTree = "<group>"; };
 		FAD731E456AF22E9593EA6A8 /* NotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDelegate.swift; sourceTree = "<group>"; };
 		FE0A70F6B73A700BDD9249AA /* SecureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -196,6 +198,7 @@
 		2B152FCB5BBE49AC79CBEFE7 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				E9A5D85351AB84C0F937F5D4 /* HeyCyanSettingsRows.swift */,
 				1F9D0A38DBBF5189FCD11F5A /* ServerConnectionFields.swift */,
 				67F71765A2D935A2D2C81421 /* SettingsView.swift */,
 			);
@@ -508,6 +511,7 @@
 				F97D25B6A731FD76DF27DEFA /* GlassesService.swift in Sources */,
 				2603D11B29BA31BB59CFC08D /* HermesLensApp.swift in Sources */,
 				D63B49707625548CD8EBF2FA /* HeyCyanGlassesService.swift in Sources */,
+				D548FAF2CCE14B5D9588CA9E /* HeyCyanSettingsRows.swift in Sources */,
 				8619DAE3D7E789CC08D6D207 /* LibraryFeed.swift in Sources */,
 				B34E24479686DCC9996BBA1C /* LibraryView.swift in Sources */,
 				F7942DB2C656BC6C954AA4CB /* LunaCall.swift in Sources */,

@@ -114,6 +114,7 @@ struct V3HomeView: View {
     }
 
     private var glassesPillTitle: String {
+        if model.glassesBrand == .heyCyan { return heyCyanPillTitle }
         if model.isGlassesCameraHeld { return "Camera on · Tap to turn off" }
         if model.isAutoConnectingGlasses { return "Connecting to your glasses…" }
         if glassesReady {
@@ -127,13 +128,26 @@ struct V3HomeView: View {
         return model.glassesRegistrationState == .registered ? "Glasses not connected · Connect" : "Set up your glasses"
     }
 
+    /// HeyCyan (beta): connection and battery from the brand-neutral status.
+    private var heyCyanPillTitle: String {
+        let status = model.glassesStatus
+        if status.isConnected { return "Glasses ready\(status.battery.map { " · \($0)%" } ?? "")" }
+        if model.heyCyan.state == .connecting { return "Connecting to your glasses…" }
+        return model.settings.heyCyanPeripheralID == nil ? "Set up your glasses in You" : "Glasses not connected · Connect"
+    }
+
     /// Low battery or heat turns the pill amber even when the glasses are ready.
     private var glassesNeedAttention: Bool {
+        if model.glassesBrand == .heyCyan { return model.glassesStatus.battery.map { $0 <= 15 } ?? false }
         guard let info = model.glassesInfo else { return false }
         return info.heat == .hot || (info.battery.map { $0 <= 15 && !info.isCharging } ?? false)
     }
 
     private func glassesAction() async {
+        if model.glassesBrand == .heyCyan {
+            await model.connectRememberedHeyCyan()
+            return
+        }
         if model.isGlassesCameraHeld {
             await model.releaseGlassesCameraForCall()
         } else if model.glassesRegistrationState == .registered {
@@ -428,7 +442,8 @@ struct V3HomeView: View {
     }
 
     private var glassesReady: Bool {
-        model.settings.usesMockGlasses
+        if model.glassesBrand == .heyCyan { return model.heyCyan.isConnected }
+        return model.settings.usesMockGlasses
             || model.glassesState == .connected
             || model.glassesState == .observing
             || model.glassesState == .paused
@@ -456,8 +471,13 @@ struct V3HomeView: View {
             return
         }
         Task { @MainActor in
-            await model.connectGlasses()
-            if glassesReady { action() }
+            if model.glassesBrand == .heyCyan {
+                await model.connectRememberedHeyCyan()
+            } else {
+                await model.connectGlasses()
+            }
+            // HeyCyan: the capture screen says plainly when the glasses aren't connected.
+            if glassesReady || model.glassesBrand == .heyCyan { action() }
         }
     }
 }

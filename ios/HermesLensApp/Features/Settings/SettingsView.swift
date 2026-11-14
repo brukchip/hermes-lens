@@ -38,54 +38,75 @@ struct SettingsView: View {
                 Text("The address of your Hermes server with the Hermes Lens plugin, and the access token you set for it (HERMES_LENS_TOKEN). The token is kept in iPhone Keychain.")
             }
 
-            Section("Glasses") {
-                statusRow(title: model.glassesInfo?.model ?? "Ray-Ban Meta", detail: glassesDetail,
-                          ready: glassesReady, symbol: "eyeglasses")
-                if let info = model.glassesInfo {
-                    if let battery = info.battery {
-                        LabeledContent("Battery", value: "\(battery)%\(info.isCharging ? " · Charging" : "")")
-                            .accessibilityIdentifier("settings.glasses.battery")
-                    }
-                    if let worn = info.isWorn {
-                        LabeledContent("On your face", value: worn ? "Yes" : "No")
-                    }
-                    if info.heat != .normal {
-                        LabeledContent("Temperature", value: info.heat == .hot ? "Too hot for the camera" : "Warm")
-                            .foregroundStyle(info.heat == .hot ? LunaColor.danger : LunaColor.warning)
+            Section {
+                Picker("Glasses", selection: Binding(get: { model.glassesBrand },
+                                                     set: { model.selectGlassesBrand($0) })) {
+                    ForEach(GlassesBrand.allCases) { brand in
+                        Text(brand.displayName).tag(brand)
                     }
                 }
-                if model.glassesRegistrationState == .registered, !settings.usesMockGlasses {
-                    LabeledContent("Camera for Luna", value: cameraAllowed.map { $0 ? "Allowed" : "Not allowed" } ?? "Checking…")
-                    if cameraAllowed == false {
-                        Button("Allow camera in Meta AI") {
-                            Task { cameraAllowed = await model.requestGlassesCameraPermission() }
+                .accessibilityIdentifier("settings.glasses.brand")
+                if model.glassesBrand == .heyCyan {
+                    HeyCyanSettingsRows()
+                    statusRow(title: "Luna", detail: lunaStatus, ready: lunaReady, symbol: "sparkles")
+                    Button("Check connections") { Task { await model.refreshReadiness() } }
+                        .accessibilityIdentifier("settings.checkConnections")
+                } else {
+                    statusRow(title: model.glassesInfo?.model ?? "Ray-Ban Meta", detail: glassesDetail,
+                              ready: glassesReady, symbol: "eyeglasses")
+                    if let info = model.glassesInfo {
+                        if let battery = info.battery {
+                            LabeledContent("Battery", value: "\(battery)%\(info.isCharging ? " · Charging" : "")")
+                                .accessibilityIdentifier("settings.glasses.battery")
                         }
-                        .accessibilityIdentifier("settings.glasses.cameraPermission")
-                    }
-                }
-                statusRow(title: "Luna", detail: lunaStatus, ready: lunaReady, symbol: "sparkles")
-                if !settings.usesMockGlasses {
-                    if model.glassesRegistrationState != .registered {
-                        Button("Set up with Meta AI") { Task { await model.registerGlasses() } }
-                            .accessibilityIdentifier("settings.glasses.register")
-                    } else if !glassesReady {
-                        Button("Connect glasses") { Task { await model.connectGlasses() } }
-                            .accessibilityIdentifier("settings.glasses.connect")
-                    }
-                    if model.glassesRegistrationState == .registered {
-                        Button("Disconnect Luna from glasses", role: .destructive) {
-                            confirmsDisconnect = true
+                        if let worn = info.isWorn {
+                            LabeledContent("On your face", value: worn ? "Yes" : "No")
                         }
-                        .accessibilityIdentifier("settings.glasses.unregister")
+                        if info.heat != .normal {
+                            LabeledContent("Temperature", value: info.heat == .hot ? "Too hot for the camera" : "Warm")
+                                .foregroundStyle(info.heat == .hot ? LunaColor.danger : LunaColor.warning)
+                        }
+                    }
+                    if model.glassesRegistrationState == .registered, !settings.usesMockGlasses {
+                        LabeledContent("Camera for Luna", value: cameraAllowed.map { $0 ? "Allowed" : "Not allowed" } ?? "Checking…")
+                        if cameraAllowed == false {
+                            Button("Allow camera in Meta AI") {
+                                Task { cameraAllowed = await model.requestGlassesCameraPermission() }
+                            }
+                            .accessibilityIdentifier("settings.glasses.cameraPermission")
+                        }
+                    }
+                    statusRow(title: "Luna", detail: lunaStatus, ready: lunaReady, symbol: "sparkles")
+                    if !settings.usesMockGlasses {
+                        if model.glassesRegistrationState != .registered {
+                            Button("Set up with Meta AI") { Task { await model.registerGlasses() } }
+                                .accessibilityIdentifier("settings.glasses.register")
+                        } else if !glassesReady {
+                            Button("Connect glasses") { Task { await model.connectGlasses() } }
+                                .accessibilityIdentifier("settings.glasses.connect")
+                        }
+                        if model.glassesRegistrationState == .registered {
+                            Button("Disconnect Luna from glasses", role: .destructive) {
+                                confirmsDisconnect = true
+                            }
+                            .accessibilityIdentifier("settings.glasses.unregister")
+                        }
+                    }
+                    Button("Check connections") { Task { await model.refreshReadiness() } }
+                        .accessibilityIdentifier("settings.checkConnections")
+                    if model.glassesRegistrationState == .registered, !settings.usesMockGlasses {
+                        Button("Update glasses software") { Task { await model.openGlassesFirmwareUpdate() } }
+                            .accessibilityIdentifier("settings.glasses.firmwareUpdate")
+                        Button("Update Luna on the glasses") { Task { await model.openGlassesAppUpdate() } }
+                            .accessibilityIdentifier("settings.glasses.appUpdate")
                     }
                 }
-                Button("Check connections") { Task { await model.refreshReadiness() } }
-                    .accessibilityIdentifier("settings.checkConnections")
-                if model.glassesRegistrationState == .registered, !settings.usesMockGlasses {
-                    Button("Update glasses software") { Task { await model.openGlassesFirmwareUpdate() } }
-                        .accessibilityIdentifier("settings.glasses.firmwareUpdate")
-                    Button("Update Luna on the glasses") { Task { await model.openGlassesAppUpdate() } }
-                        .accessibilityIdentifier("settings.glasses.appUpdate")
+            } header: {
+                Text("Glasses")
+            } footer: {
+                if model.glassesBrand == .heyCyan {
+                    Text(HeyCyanSettingsRows.warning)
+                        .accessibilityIdentifier("settings.heycyan.warning")
                 }
             }
 
