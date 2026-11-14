@@ -242,8 +242,8 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
     #expect(HeyCyanDeviceName.looksLikeHeyCyan("L 802_0A1B"))
     #expect(HeyCyanDeviceName.looksLikeHeyCyan("L802_0001"))
     #expect(HeyCyanDeviceName.looksLikeHeyCyan("M01_0C2D"))
-    #expect(!HeyCyanDeviceName.looksLikeHeyCyan("Mars"))
-    #expect(!HeyCyanDeviceName.looksLikeHeyCyan("Bruk's AirPods"))
+    #expect(!HeyCyanDeviceName.looksLikeHeyCyan("My Phone"))
+    #expect(!HeyCyanDeviceName.looksLikeHeyCyan("Someone's AirPods"))
 }
 
 // MARK: Assistant button vs. the glasses' own listening after a photo
