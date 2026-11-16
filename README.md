@@ -186,6 +186,7 @@ minutes. A retried request never runs twice.
 | `HERMES_LENS_ASSISTANT_NAME` | `Luna` | What the voice companion calls itself. |
 | `HERMES_LENS_USER_NAME` | empty | Your name, so it can address you. |
 | `HERMES_LENS_PERSONA_NOTES` | empty | Extra guidance, e.g. "Keep answers short; I'm often somewhere noisy". |
+| `HERMES_LENS_LANGUAGES` | empty (any) | The languages it may answer in, e.g. `English, Spanish`; the first is used when it can't tell. Glasses microphones are noisy, and without a list an unclear sentence can make it switch language. |
 | `HERMES_LENS_VOICE` | `Kore` | Gemini prebuilt voice. |
 | `HERMES_LENS_MODEL` | `gemini-3.8-live` | Gemini Live model. |
 | `HERMES_LENS_CONFIRM_TOOLS` | `cronjob_manage,cronjob,send_message` | Tools that need your tap when asked for through the glasses, on top of Hermes's own approval rules. Names are matched exactly, and `send_message` only applies on Hermes versions where the agent can call a tool of that name; a message sent some other way (a shell command, an MCP tool) falls under Hermes's own rules. Listing jobs never asks. `none` turns it off. |

@@ -20,6 +20,18 @@ def test_persona_is_generic_and_takes_the_owner_settings():
     assert "You are Luna," in default and "user's name" not in default
 
 
+def test_reply_languages_are_the_owners_and_noise_never_switches_them():
+    default = voice.persona()
+    assert "Reply in the language the user speaks" in default and "never switch" in default
+    assert "Answer only in" not in default
+    two = voice.persona(languages="English, Spanish")
+    assert "Answer only in English or Spanish, never in any other language" in two
+    assert "if you are unsure, use English" in two and "Reply in the language the user speaks" not in two
+    three = voice.language_rule(" French ,German,  Italian ")
+    assert "Answer only in French, German or Italian" in three and "use French" in three
+    assert voice.language_rule(" , ") == voice.language_rule("")
+
+
 def test_voice_model_can_reach_hermes_the_camera_and_contacts_but_nothing_else():
     names = [d["name"] for d in voice.TOOL_DECLARATIONS[0]["functionDeclarations"]]
     assert names == ["ask_luna", "look", "record_video", "save_contact"]

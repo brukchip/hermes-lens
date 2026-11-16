@@ -106,7 +106,8 @@ class HermesLensAdapter(BasePlatformAdapter):
         self.persona = voice.persona(
             self.assistant,
             str(_setting(config, "HERMES_LENS_USER_NAME", "user_name", "")),
-            str(_setting(config, "HERMES_LENS_PERSONA_NOTES", "persona_notes", "")))
+            str(_setting(config, "HERMES_LENS_PERSONA_NOTES", "persona_notes", "")),
+            str(_setting(config, "HERMES_LENS_LANGUAGES", "languages", "")))
         self.daily_seconds = 60 * _int(_setting(config, "HERMES_LENS_DAILY_MINUTES", "daily_minutes", 60), 60)
         self._broker: Optional[grant.CallBroker] = None
         self._runner = None

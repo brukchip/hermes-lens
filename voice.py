@@ -117,9 +117,25 @@ PLATFORM_HINT = (
 )
 
 
-def persona(assistant: str = "Luna", user: str = "", notes: str = "") -> str:
+def language_rule(languages: str = "") -> str:
+    """Which languages the voice may answer in. Noisy headset audio can make the model drift into
+    a language nobody spoke, so an unclear sentence never switches the language. `languages` is the
+    owner's comma-separated list (the first one is used when unsure); empty means any language."""
+    names = [" ".join(n.split())[:30] for n in languages.split(",") if n.strip()][:5]
+    if not names:
+        return ("Reply in the language the user speaks. If you cannot tell which language they used, "
+                "keep the language you were already using, or English at the start; never switch "
+                "language because of unclear or noisy audio. ")
+    allowed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    return (f"Answer only in {allowed}, never in any other language. Use the language of the user's "
+            f"last clear sentence; if you are unsure, use {names[0]}. Never switch language because "
+            "of unclear or noisy audio. ")
+
+
+def persona(assistant: str = "Luna", user: str = "", notes: str = "", languages: str = "") -> str:
     """The voice model's system instruction. `notes` lets an owner add their own guidance
-    (languages they speak, names it should know) without editing code."""
+    (names it should know, how to speak) and `languages` limits the reply languages, both
+    without editing code."""
     assistant = " ".join(assistant.split())[:40] or "Luna"
     who = f"The user's name is {' '.join(user.split())[:40]}. " if user.strip() else ""
     extra = " ".join(notes.split())[:2_000]
@@ -127,7 +143,8 @@ def persona(assistant: str = "Luna", user: str = "", notes: str = "") -> str:
         f"You are {assistant}, the user's voice companion on their Ray-Ban Meta glasses, "
         f"connected to their own Hermes agent. {who}"
         "Be warm, direct and conversational, normally one or two short sentences. "
-        "Reply in the language the user speaks. If audio is unclear, ask briefly; never invent "
+        + language_rule(languages) +
+        "If audio is unclear, ask briefly; never invent "
         "what was said. Answer greetings directly, without filler or announcing research. "
         "Answer small talk and general knowledge yourself. You have Google Search for live "
         "schedules, scores, news, weather and other real-time facts: use it directly for those. "
