@@ -42,6 +42,8 @@ final class HeyCyanPhotoTransfer {
         case waitingForKnownNetwork
         case findingGlasses
         case downloading
+        /// A call's look: the small AI photo over Bluetooth.
+        case bringingAIPhoto
 
         /// For the Photo screen and Settings while it runs.
         var displayText: String {
@@ -53,6 +55,7 @@ final class HeyCyanPhotoTransfer {
             case .waitingForKnownNetwork: "Waiting for the iPhone to join the glasses' Wi-Fi"
             case .findingGlasses: "Finding the glasses on their Wi-Fi"
             case .downloading: "Bringing the photo to this iPhone"
+            case .bringingAIPhoto: "Bringing a small photo over Bluetooth"
             }
         }
     }
@@ -153,6 +156,18 @@ final class HeyCyanPhotoTransfer {
                 + "on_wifi=\(lastFailureWiFi?.onWiFi ?? false) on_glasses_wifi=\(lastFailureWiFi?.onGlassesWiFi ?? false)")
             return .callFallback(fallback, photosOnGlasses: count)
         }
+    }
+
+    /// A call's look: the small AI photo over Bluetooth (`HeyCyanGlassesService.captureAIPhoto`),
+    /// about 4 s, no Wi-Fi. One photo at a time, with the Wi-Fi transfer too.
+    func takeAIPhoto() async throws(HeyCyanAIPhotoFailure) -> Data {
+        guard stage == nil else {
+            VoiceDiagnosticLog.record("heycyan.aiphoto", "stage=fail result=busy chunks=0/? bytes=0 ms=0")
+            throw .busy
+        }
+        stage = .bringingAIPhoto
+        defer { stage = nil }
+        return try await glasses.captureAIPhoto()
     }
 
     /// How the phone gets onto the glasses' network.

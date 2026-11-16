@@ -299,18 +299,15 @@ final class AppModel {
     /// start, so it gets up to 10 s before falling back to a full photo; a stream that
     /// never started gets no wait at all.
     ///
-    /// HeyCyan: the photo is taken on the glasses and, when this iPhone knows their Wi-Fi,
-    /// brought over it within the call's look budget (about 35 s). `progress` gets a note for
-    /// Luna once it is coming over, so she can tell the user while they wait.
-    func captureCallFrame(progress: (@MainActor (String) -> Void)? = nil) async throws -> Data {
+    /// HeyCyan: the glasses take an AI photo and the phone pulls its small JPEG over Bluetooth
+    /// (about 4 s, no Wi-Fi; `HeyCyanGlassesService.captureAIPhoto`).
+    func captureCallFrame() async throws -> Data {
         if glassesBrand == .heyCyan {
-            // When it cannot be brought over, Luna is told why (by the error's code) instead of
-            // being given an image.
-            let outcome = await takeHeyCyanPhoto(fetch: true, context: .call) {
-                progress?(HeyCyanPhotoTransfer.comingOverNote)
-            }
-            guard case .fetched(let jpeg, _, _) = outcome else { throw LunaCameraError(code: outcome.lookCode) }
-            VoiceDiagnosticLog.record("glasses.call_frame", "source=heycyan \(Self.imageShape(jpeg))")
+            // When it does not come over, Luna is told so (by the error's code) instead of being
+            // given an image.
+            let jpeg: Data
+            do { jpeg = try await takeHeyCyanAIPhoto() } catch { throw LunaCameraError(code: error.lookCode) }
+            VoiceDiagnosticLog.record("glasses.call_frame", "source=heycyan_bluetooth \(Self.imageShape(jpeg))")
             _ = try? await beginArtifact(data: jpeg, kind: .photo, request: "Photo from a Luna call")
             return jpeg
         }
@@ -871,6 +868,17 @@ final class AppModel {
                                                       knownNetwork: heyCyanKnownNetwork, onComingOver: onComingOver)
         if case .fetched(_, _, let network) = outcome { rememberHeyCyanNetwork(network) }
         return outcome
+    }
+
+    /// A call's look on HeyCyan glasses: the AI photo over Bluetooth, reconnecting first if the
+    /// glasses were remembered. Refused (`busy`) while another photo is taken or brought over.
+    func takeHeyCyanAIPhoto() async throws(HeyCyanAIPhotoFailure) -> Data {
+        guard !heyCyanTransfer.isBusy else { throw .busy }
+        if !heyCyan.isConnected, let id = settings.heyCyanPeripheralID {
+            try? await heyCyan.connect(to: id)
+        }
+        guard heyCyan.isConnected else { throw .notConnected }
+        return try await heyCyanTransfer.takeAIPhoto()
     }
 
     /// The name of the paired glasses' Wi-Fi when this iPhone has joined it before (a fetch

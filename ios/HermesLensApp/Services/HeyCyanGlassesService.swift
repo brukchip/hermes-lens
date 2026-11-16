@@ -9,8 +9,10 @@ import UIKit
 /// The glasses do not advertise their services, so a scan lists every named device (`M01…`,
 /// `L 802…` names first) and the user picks one. Once connected, the app subscribes to the
 /// big-data channel and can only send the allowlisted `HeyCyanCommand`s: take a photo (it is
-/// stored on the glasses), count the media on the glasses, ask for the battery level, and open
-/// and close the glasses' own Wi-Fi for one photo download (`HeyCyanPhotoTransfer`).
+/// stored on the glasses), take an "AI photo" and pull its small JPEG over Bluetooth
+/// (`captureAIPhoto`, a call's look), count the media on the glasses, ask for the battery
+/// level, and open and close the glasses' own Wi-Fi for one photo download
+/// (`HeyCyanPhotoTransfer`).
 ///
 /// Foreground only: nothing here scans or reconnects in the background, and there is no state
 /// restoration. The app reconnects to the remembered glasses when it becomes active.
@@ -100,6 +102,10 @@ final class HeyCyanGlassesService: NSObject {
     @ObservationIgnored private(set) var reportedWiFiAddress: String?
     /// When `reportedWiFiAddress` arrived (for the `stage=wifi_ip` trace).
     @ObservationIgnored private(set) var reportedWiFiAddressAt: ContinuousClock.Instant?
+    /// The AI photo being pulled (`captureAIPhoto`), and the one wait on it.
+    @ObservationIgnored private var aiPhoto: AIPhotoPull?
+    @ObservationIgnored private var aiPhotoWaiter: (id: UUID, continuation: CheckedContinuation<Void, Never>)?
+    @ObservationIgnored private var aiPhotoWoken = false
 
     private let serviceUUID = CBUUID(string: HeyCyanUUID.bigDataService)
     private let notifyUUID = CBUUID(string: HeyCyanUUID.bigDataNotify)
@@ -251,6 +257,170 @@ final class HeyCyanGlassesService: NSObject {
         }
     }
 
+    // MARK: AI photo (a small JPEG over Bluetooth, for a call's look)
+
+    private struct AIPhotoPull {
+        var assembler = HeyCyanAIPhotoAssembler()
+        /// The chunk count from the "shot done" event.
+        var announcedChunks: Int?
+        /// After the last chunk without a JPEG end: raw notifications are the photo's tail.
+        var acceptsTail = false
+    }
+
+    /// The shot event normally comes about 2.5 s after the trigger.
+    static let aiPhotoShotWait: Duration = .seconds(6)
+    static let aiPhotoChunkTimeout: Duration = .seconds(3)
+    static let aiPhotoChunkRetries = 3
+    /// How long raw notifications may still bring the end of the JPEG after the last chunk.
+    static let aiPhotoTailWait: Duration = .seconds(2)
+
+    /// Takes an AI photo (`HeyCyanCommand.takeAIPhoto`) and pulls its JPEG chunk by chunk over
+    /// Bluetooth, no Wi-Fi: about 4 s at size 2. Waits up to 6 s for the "shot done" event
+    /// (without it, chunk 0 is still asked for once), then asks for each chunk with a 3 s
+    /// timeout and up to 3 repeats of the same index. The whole pull may take 3 s plus 0.25 s
+    /// per chunk once the count is known, and never more than 20 s from the trigger. Shares the
+    /// one-photo-at-a-time guard with `takePhoto`; cancelling the calling task stops it.
+    func captureAIPhoto() async throws(HeyCyanAIPhotoFailure) -> Data {
+        let clock = ContinuousClock()
+        let started = clock.now
+        func ms() -> Int { Int((clock.now - started) / .milliseconds(1)) }
+        func failed(_ failure: HeyCyanAIPhotoFailure) -> HeyCyanAIPhotoFailure {
+            let pull = aiPhoto?.assembler
+            trace("heycyan.aiphoto", "stage=fail result=\(failure.traceLabel) chunks=\(pull?.received ?? 0)/"
+                + "\(pull?.total.map(String.init) ?? "?") bytes=\(pull?.byteCount ?? 0) ms=\(ms())")
+            return failure
+        }
+        guard isConnected else { throw failed(.notConnected) }
+        guard !isTakingPhoto else { throw failed(.busy) }
+        isTakingPhoto = true
+        aiPhoto = AIPhotoPull()
+        aiPhotoWoken = false
+        defer {
+            isTakingPhoto = false
+            aiPhoto = nil
+            // The glasses may start their own listening after the photo, not only after the trigger.
+            buttonFilter.photoCommandSent(at: .now)
+        }
+        var deadline = started + .seconds(HeyCyanAIPhoto.maximumSeconds)
+        var budgetSet = false
+        func check() throws(HeyCyanAIPhotoFailure) {
+            if Task.isCancelled { throw failed(.cancelled) }
+            guard isConnected, aiPhoto != nil else { throw failed(.disconnected) }
+            if !budgetSet, let count = aiPhoto?.announcedChunks ?? aiPhoto?.assembler.total {
+                budgetSet = true
+                deadline = min(deadline, clock.now + .seconds(HeyCyanAIPhoto.pullSeconds(chunkCount: count)))
+            }
+            guard clock.now < deadline else { throw failed(.outOfTime) }
+        }
+
+        do { try send(.takeAIPhoto) } catch { throw failed(.notConnected) }
+        trace("heycyan.aiphoto", "stage=trigger result=sent size=\(HeyCyanAIPhoto.size) ms=0")
+
+        let shotDeadline = min(deadline, started + Self.aiPhotoShotWait)
+        while aiPhoto?.announcedChunks == nil, clock.now < shotDeadline {
+            await waitForAIPhoto(until: shotDeadline)
+            if Task.isCancelled || !isConnected { break }
+        }
+        try check()
+        let announced = aiPhoto?.announcedChunks
+        trace("heycyan.aiphoto", "stage=shot result=\(announced == nil ? "no_event" : "ok") "
+            + "chunks=0/\(announced.map(String.init) ?? "?") bytes=0 ms=\(ms())")
+
+        var index = 0
+        var repeats = 0
+        func request(_ index: Int) throws(HeyCyanAIPhotoFailure) -> ContinuousClock.Instant {
+            do { try send(.requestAIPhotoChunk(index: UInt16(index))) } catch { throw failed(.disconnected) }
+            return min(deadline, clock.now + Self.aiPhotoChunkTimeout)
+        }
+        var chunkDeadline = try request(index)
+        while true {
+            try check()
+            guard let assembler = aiPhoto?.assembler else { throw failed(.disconnected) }
+            if assembler.isComplete { break }
+            if assembler.received > index {
+                if index == 0 {
+                    trace("heycyan.aiphoto", "stage=chunk result=first chunks=1/\(assembler.total ?? 0) "
+                        + "bytes=\(assembler.byteCount) ms=\(ms())")
+                }
+                index = assembler.received
+                repeats = 0
+                chunkDeadline = try request(index)
+                continue
+            }
+            if clock.now >= chunkDeadline {
+                // Without the shot event, chunk 0 is asked for once only.
+                let allowed = aiPhoto?.announcedChunks != nil || index > 0 ? Self.aiPhotoChunkRetries : 0
+                guard repeats < allowed else { throw failed(.noReply) }
+                repeats += 1
+                trace("heycyan.aiphoto", "stage=chunk result=repeat index=\(index) attempt=\(repeats + 1) "
+                    + "chunks=\(assembler.received)/\(assembler.total.map(String.init) ?? "?") ms=\(ms())")
+                chunkDeadline = try request(index)
+                continue
+            }
+            await waitForAIPhoto(until: chunkDeadline)
+        }
+
+        if aiPhoto?.assembler.hasJPEGEnd == false {
+            aiPhoto?.acceptsTail = true
+            let tailDeadline = min(started + .seconds(HeyCyanAIPhoto.maximumSeconds), clock.now + Self.aiPhotoTailWait)
+            while aiPhoto?.assembler.hasJPEGEnd == false, clock.now < tailDeadline {
+                await waitForAIPhoto(until: tailDeadline)
+                if Task.isCancelled { throw failed(.cancelled) }
+                guard isConnected else { throw failed(.disconnected) }
+            }
+            trace("heycyan.aiphoto", "stage=chunk result=tail ended=\(aiPhoto?.assembler.hasJPEGEnd ?? false) "
+                + "bytes=\(aiPhoto?.assembler.byteCount ?? 0) ms=\(ms())")
+        }
+        guard let assembler = aiPhoto?.assembler, let jpeg = assembler.jpeg else { throw failed(.notAPhoto) }
+        trace("heycyan.aiphoto", "stage=done result=ok chunks=\(assembler.received)/\(assembler.total ?? 0) "
+            + "bytes=\(jpeg.count) ms=\(ms())")
+        return jpeg
+    }
+
+    /// Returns when the AI photo pull changed (an event, a chunk, a tail, a disconnect), at
+    /// `deadline`, or when the calling task is cancelled.
+    private func waitForAIPhoto(until deadline: ContinuousClock.Instant) async {
+        if aiPhotoWoken {
+            aiPhotoWoken = false
+            return
+        }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                if Task.isCancelled { continuation.resume(); return }
+                aiPhotoWaiter = (id, continuation)
+                Task { [weak self] in
+                    try? await Task.sleep(until: deadline, clock: .continuous)
+                    self?.resumeAIPhotoWaiter(id)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.resumeAIPhotoWaiter(id) }
+        }
+    }
+
+    private func resumeAIPhotoWaiter(_ id: UUID) {
+        guard let waiter = aiPhotoWaiter, waiter.id == id else { return }
+        aiPhotoWaiter = nil
+        waiter.continuation.resume()
+    }
+
+    /// The pull changed: wakes its wait, or the next one returns at once.
+    private func wakeAIPhoto() {
+        if let waiter = aiPhotoWaiter {
+            aiPhotoWaiter = nil
+            waiter.continuation.resume()
+        } else {
+            aiPhotoWoken = true
+        }
+    }
+
+    private func handleAIPhotoChunk(_ chunk: HeyCyanAIPhotoChunk) {
+        guard aiPhoto != nil else { return }  // a late reply after the pull ended
+        _ = aiPhoto?.assembler.accept(chunk)
+        wakeAIPhoto()
+    }
+
     // MARK: Transfer mode (the glasses' own Wi-Fi, for one photo download)
 
     /// Asks the glasses to open their Wi-Fi and returns its name and password. Throws
@@ -318,11 +488,21 @@ final class HeyCyanGlassesService: NSObject {
 
     private func send(_ command: HeyCyanCommand) throws {
         guard state == .connected, let peripheral, let writeCharacteristic else { throw HeyCyanError.notConnected }
-        let type: CBCharacteristicWriteType = writeCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
-        if command == .takePhoto { buttonFilter.photoCommandSent(at: .now) }
+        let properties = writeCharacteristic.properties
+        let type: CBCharacteristicWriteType
+        if case .requestAIPhotoChunk = command, properties.contains(.writeWithoutResponse) {
+            type = .withoutResponse  // as on the Mac test tool
+        } else {
+            type = properties.contains(.write) ? .withResponse : .withoutResponse
+        }
+        if command == .takePhoto || command == .takeAIPhoto { buttonFilter.photoCommandSent(at: .now) }
         peripheral.writeValue(Data(command.bytes), for: writeCharacteristic, type: type)
-        // The minute-by-minute battery request is traced by its result instead.
-        if command != .batteryLevel { trace("heycyan.send", command.label) }
+        // The minute-by-minute battery request is traced by its result, chunk requests by
+        // `heycyan.aiphoto`.
+        switch command {
+        case .batteryLevel, .requestAIPhotoChunk: break
+        default: trace("heycyan.send", command.label)
+        }
     }
 
     private func ensureCentral() -> CBCentralManager {
@@ -404,6 +584,7 @@ final class HeyCyanGlassesService: NSObject {
         addressWaiters.removeAll()
         for waiter in addresses.values { waiter.resume(returning: nil) }
         reportedWiFiAddress = nil
+        wakeAIPhoto()
         connectWaiter?.resume(throwing: HeyCyanError.notConnected)
         connectWaiter = nil
     }
@@ -445,6 +626,13 @@ final class HeyCyanGlassesService: NSObject {
             for waiter in waiters.values { waiter.resume(returning: count) }
         case .photoReply:
             trace("heycyan.event", "photo_reply")
+        case .aiPhotoReply:
+            trace("heycyan.event", "ai_photo_reply")
+        case .aiPhotoReady(let chunkCount):
+            trace("heycyan.event", "ai_photo_ready chunks=\(chunkCount) pulling=\(aiPhoto != nil)")
+            guard aiPhoto != nil else { return }
+            aiPhoto?.announcedChunks = chunkCount
+            wakeAIPhoto()
         case .transferCredentials(let credentials):
             // Never the name or password: only that they arrived.
             trace("heycyan.transfer", "event=credentials has_password=\(!credentials.password.isEmpty) waiting=\(credentialWaiters.count)")
@@ -467,7 +655,7 @@ final class HeyCyanGlassesService: NSObject {
             for waiter in waiters.values { waiter.resume(returning: address) }
         case .wifiError(let code):
             trace("heycyan.transfer", "event=wifi_error code=\(code)")
-        case .volume, .state, .otherEvent, .controlReply, .unknown:
+        case .volume, .state, .otherEvent, .controlReply, .unknown, .aiPhotoChunk:
             break
         }
     }
@@ -571,11 +759,59 @@ extension HeyCyanGlassesService: @preconcurrency CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard peripheral == self.peripheral, characteristic.uuid == notifyUUID, error == nil,
               let value = characteristic.value else { return }
-        for frame in parser.push(value) { handle(HeyCyanEvent(frame)) }
+        // Some firmware may send the end of an AI photo as raw notifications after its last chunk.
+        if aiPhoto?.acceptsTail == true, parser.pendingByteCount == 0, value.first != HeyCyanFrame.magic {
+            aiPhoto?.assembler.appendTail(value)
+            wakeAIPhoto()
+            return
+        }
+        for frame in parser.push(value) {
+            // Other frames (events, battery) can arrive between chunks; they go their usual way.
+            if let chunk = HeyCyanAIPhotoChunk(frame) {
+                handleAIPhotoChunk(chunk)
+            } else {
+                handle(HeyCyanEvent(frame))
+            }
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if error != nil { trace("heycyan.send", "result=failed") }
+    }
+}
+
+/// Why an AI photo did not come over Bluetooth. The photo may still be saved on the glasses.
+enum HeyCyanAIPhotoFailure: Error, Equatable {
+    case notConnected
+    /// Another photo is being taken or brought over.
+    case busy
+    /// A chunk went unanswered (3 s, repeated up to 3 times).
+    case noReply
+    case outOfTime
+    /// The chunks did not make a JPEG.
+    case notAPhoto
+    case disconnected
+    case cancelled
+
+    var traceLabel: String {
+        switch self {
+        case .notConnected: "not_connected"
+        case .busy: "busy"
+        case .noReply: "no_reply"
+        case .outOfTime: "out_of_time"
+        case .notAPhoto: "not_jpeg"
+        case .disconnected: "disconnected"
+        case .cancelled: "cancelled"
+        }
+    }
+
+    /// The fixed code a call's `look` reports (`LunaCameraError`).
+    var lookCode: String {
+        switch self {
+        case .notConnected: "heycyan_not_connected"
+        case .busy: "heycyan_busy"
+        default: "heycyan_ai_photo_failed"
+        }
     }
 }
 
