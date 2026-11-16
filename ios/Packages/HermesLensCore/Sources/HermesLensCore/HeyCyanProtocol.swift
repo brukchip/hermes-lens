@@ -121,11 +121,11 @@ public struct HeyCyanFrameParser: Sendable {
     }
 }
 
-/// The only commands the app can send. Each is read-only, takes a photo, or opens and closes the
-/// glasses' own Wi-Fi for one photo download. There is no way to build any other frame: factory
-/// reset `02 01 0A`, restart `02 01 0E`, OTA mode `02 01 05`, DFU and firmware opcodes are
-/// deliberately absent.
-public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
+/// The only commands the app can send. Each is read-only, takes a photo, pulls the small "AI
+/// photo" over Bluetooth, or opens and closes the glasses' own Wi-Fi for one photo download.
+/// There is no way to build any other frame: factory reset `02 01 0A`, restart `02 01 0E`, OTA
+/// mode `02 01 05`, DFU and firmware opcodes are deliberately absent.
+public enum HeyCyanCommand: Equatable, Sendable {
     /// Glasses control: take one photo. It is stored on the glasses.
     case takePhoto
     /// Glasses control: how many photos, videos and recordings are on the glasses.
@@ -142,14 +142,29 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
     case enterTransferMode
     /// Glasses control: close the glasses' Wi-Fi again. Always sent after a download attempt.
     case exitTransferMode
+    /// Glasses control: take an "AI photo" (`02 01 06 <size> <size> 02`, size
+    /// `HeyCyanAIPhoto.size`). The shutter fires and the glasses keep a small JPEG copy for
+    /// the phone to pull (`requestAIPhotoChunk`). Never follow it with `takePhoto`: that takes
+    /// a second, normal photo.
+    case takeAIPhoto
+    /// Asks for one chunk of the AI photo (`0xFD`, payload `01 <index UInt16 LE>`). The glasses
+    /// do not push the photo; each chunk is pulled. Written without response.
+    case requestAIPhotoChunk(index: UInt16)
 
     static let glassesControl: UInt8 = 0x41
     static let syncBattery: UInt8 = 0x42
+    static let aiPhotoChunk: UInt8 = 0xFD
+
+    /// Every command without a parameter. `requestAIPhotoChunk` is matched by its layout.
+    public static let parameterless: [HeyCyanCommand] = [
+        .takePhoto, .mediaCount, .batteryLevel, .enterTransferMode, .exitTransferMode, .takeAIPhoto,
+    ]
 
     var command: UInt8 {
         switch self {
-        case .takePhoto, .mediaCount, .enterTransferMode, .exitTransferMode: Self.glassesControl
+        case .takePhoto, .mediaCount, .enterTransferMode, .exitTransferMode, .takeAIPhoto: Self.glassesControl
         case .batteryLevel: Self.syncBattery
+        case .requestAIPhotoChunk: Self.aiPhotoChunk
         }
     }
 
@@ -160,12 +175,18 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         case .batteryLevel: [0x00, 0x00]
         case .enterTransferMode: [0x02, 0x01, 0x04, 0x02]
         case .exitTransferMode: [0x02, 0x01, 0x09]
+        case .takeAIPhoto: HeyCyanAIPhoto.triggerPayload(size: HeyCyanAIPhoto.size)
+        case .requestAIPhotoChunk(let index): [0x01, UInt8(index & 0xFF), UInt8(index >> 8)]
         }
     }
 
     /// The allowlisted command these exact bytes stand for, or nil for anything else.
     public init?(command: UInt8, payload: [UInt8]) {
-        guard let match = Self.allCases.first(where: { $0.command == command && $0.payload == payload }) else {
+        if command == Self.aiPhotoChunk, payload.count == 3, payload[0] == 0x01 {
+            self = .requestAIPhotoChunk(index: UInt16(payload[1]) | UInt16(payload[2]) << 8)
+            return
+        }
+        guard let match = Self.parameterless.first(where: { $0.command == command && $0.payload == payload }) else {
             return nil
         }
         self = match
@@ -182,6 +203,8 @@ public enum HeyCyanCommand: CaseIterable, Equatable, Sendable {
         case .batteryLevel: "battery_level"
         case .enterTransferMode: "enter_transfer_mode"
         case .exitTransferMode: "exit_transfer_mode"
+        case .takeAIPhoto: "take_ai_photo"
+        case .requestAIPhotoChunk: "request_ai_photo_chunk"
         }
     }
 }
@@ -278,6 +301,13 @@ public enum HeyCyanEvent: Equatable, Sendable {
     /// and differ by model (`FF FF` and `00 02` on the L802, `FF 01` on the M01), so the app
     /// confirms a photo by the media count going up instead.
     case photoReply
+    /// Reply to `HeyCyanCommand.takeAIPhoto` (`02 01 06 …`; `FF FF` on the L802): accepted.
+    case aiPhotoReply
+    /// The AI photo is ready to pull (event 0x73, type 0x02: `02 00 <chunk count> 01 00`).
+    /// The count is one byte here; the chunk replies carry the authoritative total.
+    case aiPhotoReady(chunkCount: Int)
+    /// One chunk of the AI photo (0xFD); its bytes are read with `HeyCyanAIPhotoChunk`.
+    case aiPhotoChunk(index: Int, total: Int, byteCount: Int)
     /// Reply to `HeyCyanCommand.enterTransferMode` with the glasses' Wi-Fi network.
     case transferCredentials(HeyCyanWiFiCredentials)
     /// A transfer-mode reply without usable credentials (refused, or a format not understood).
@@ -304,6 +334,7 @@ public enum HeyCyanEvent: Equatable, Sendable {
             guard let type = p.first else { self = .otherEvent(type: 0); return }
             switch type {
             case 0x05 where p.count >= 2: self = .battery(percent: min(100, Int(p[1])))
+            case 0x02 where p.count >= 3: self = .aiPhotoReady(chunkCount: Int(p[2]))
             case 0x03: self = .micStarted
             case 0x0A: self = .micStopped
             case 0x12: self = .volume
@@ -325,6 +356,8 @@ public enum HeyCyanEvent: Equatable, Sendable {
                 self = .mediaCount(HeyCyanMediaCount(photos: le16(2), videos: le16(4), recordings: le16(6)))
             } else if p.count >= 3, p[0] == 0x02, p[1] == 0x01, p[2] == 0x01 {
                 self = .photoReply
+            } else if p.count >= 3, p[0] == 0x02, p[1] == 0x01, p[2] == 0x06 {
+                self = .aiPhotoReply
             } else if p.count >= 3, p[0] == 0x02, p[1] == 0x01, p[2] == 0x04 {
                 self = HeyCyanWiFiCredentials(controlPayload: p).map(Self.transferCredentials)
                     ?? .transferModeReply(byteCount: p.count)
@@ -332,6 +365,12 @@ public enum HeyCyanEvent: Equatable, Sendable {
                 self = .exitTransferReply
             } else {
                 self = .controlReply(byteCount: p.count)
+            }
+        case HeyCyanCommand.aiPhotoChunk:
+            if let chunk = HeyCyanAIPhotoChunk(frame) {
+                self = .aiPhotoChunk(index: chunk.index, total: chunk.total, byteCount: chunk.bytes.count)
+            } else {
+                self = .unknown(command: frame.command, byteCount: p.count)
             }
         default:
             self = .unknown(command: frame.command, byteCount: p.count)
@@ -354,7 +393,8 @@ public enum HeyCyanDeviceName {
 /// Both arrive as the same "mic started" event. The M01 starts its microphone by itself right
 /// after the app's take-photo command (its own "describe the photo" listening, about 5 s of
 /// audio), so a mic-started event within `photoQuietSeconds` of the app's last photo command
-/// is never treated as the user pressing the button.
+/// (a normal or an AI photo, or the end of pulling an AI photo) is never treated as the user
+/// pressing the button.
 public struct HeyCyanAssistantButtonFilter: Sendable {
     public static let photoQuietSeconds: TimeInterval = 10
 

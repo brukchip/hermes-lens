@@ -79,8 +79,8 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
 }
 
 @Test func onlyTheAllowlistedCommandsCanBeBuilt() {
-    #expect(HeyCyanCommand.allCases == [
-        .takePhoto, .mediaCount, .batteryLevel, .enterTransferMode, .exitTransferMode,
+    #expect(HeyCyanCommand.parameterless == [
+        .takePhoto, .mediaCount, .batteryLevel, .enterTransferMode, .exitTransferMode, .takeAIPhoto,
     ])
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x01, 0x01]) == .takePhoto)
     #expect(HeyCyanCommand(command: 0x41, payload: [0x02, 0x04]) == .mediaCount)
@@ -129,7 +129,7 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
     ]
     for payload in forbidden {
         #expect(HeyCyanCommand(command: 0x41, payload: payload) == nil)
-        for command in HeyCyanCommand.allCases { #expect(command.bytes != HeyCyanFrame(command: 0x41, payload: payload).encoded) }
+        for command in HeyCyanCommand.parameterless { #expect(command.bytes != HeyCyanFrame(command: 0x41, payload: payload).encoded) }
     }
     // Firmware-update (DFU) opcodes: no command byte other than glasses control is reachable.
     for dfu: UInt8 in [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x0C, 0x60] {
@@ -149,8 +149,10 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
         }
     }
     // takePhoto is reached twice ([2,1,x] and [x,1,1] with x = 1/2), mediaCount once, and
-    // exit transfer once ([2,1,9]). Enter transfer needs four bytes ([2,1,4,2]).
-    #expect(Set(accepted.map(\.label)) == ["take_photo", "media_count", "exit_transfer_mode"])
+    // exit transfer once ([2,1,9]). Enter transfer needs four bytes ([2,1,4,2]), the AI photo
+    // six. A chunk request is only 0xFD with `01` and a two-byte index ([1,1,1] here).
+    #expect(Set(accepted.map(\.label)) == ["take_photo", "media_count", "exit_transfer_mode", "request_ai_photo_chunk"])
+    #expect(accepted.filter { $0.label == "request_ai_photo_chunk" } == [.requestAIPhotoChunk(index: 257)])
     #expect(accepted.filter { $0 == .exitTransferMode }.count == 1)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00]) == nil)
     #expect(HeyCyanCommand(command: 0x42, payload: [0x00, 0x01]) == nil)
