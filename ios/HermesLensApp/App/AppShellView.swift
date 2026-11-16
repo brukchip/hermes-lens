@@ -335,10 +335,10 @@ struct AppShellView: View {
     /// Photo and Record flows.
     private var nativeLocalTools: LunaNativeLocalTools {
         LunaNativeLocalTools(
-            capturePhoto: { [model] in
+            capturePhoto: { [model] progress in
                 guard model.settings.allowsCameraInCalls else { throw LunaCameraError(code: "camera_off_in_settings") }
                 if let blocker = model.glassesCameraBlocker { throw LunaCameraError(code: blocker) }
-                do { return try await model.captureCallFrame() }
+                do { return try await model.captureCallFrame(progress: progress) }
                 catch let error as LunaCameraError { throw error }  // HeyCyan: why no photo came over
                 catch { throw LunaCameraError(code: "photo_glasses_\(model.glassesState)") }
             },

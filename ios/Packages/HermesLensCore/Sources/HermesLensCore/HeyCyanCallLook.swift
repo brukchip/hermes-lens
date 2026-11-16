@@ -39,7 +39,7 @@ public struct HeyCyanKnownNetworks: Codable, Equatable, Sendable {
 
 /// What Luna says when a look in a call took the photo but could not bring it over. The photo
 /// is saved on the glasses in every case.
-public enum HeyCyanCallLookFallback: Equatable, Sendable {
+public enum HeyCyanCallLookFallback: CaseIterable, Equatable, Sendable {
     /// This iPhone has not joined the glasses' Wi-Fi yet (or the glasses now use another
     /// network): the one-time setup in You › Glasses is needed.
     case setupNeeded

@@ -144,9 +144,14 @@ What works:
     password; if it is refused, `123456789`) and come back. Luna continues as soon as the
     glasses answer (she waits up to 3 minutes), then says you can go back to your usual Wi-Fi.
   - **With automatic joining** (see below): the iPhone asks once, "Join network…?".
-- **Look** in a call: with automatic joining, the photo comes over and Luna describes it
-  (or gives up after about 25 seconds). In the default build a call can't wait for you to
-  join a network in Settings, so the photo stays on the glasses and Luna says so.
+- **Look** in a call: after one successful **Take and fetch a test photo**, this iPhone
+  knows the glasses' Wi-Fi (You › Glasses shows "This iPhone knows the glasses' Wi-Fi ✓";
+  only the network name is kept, never the password). A look then takes the photo, Luna
+  says it is coming over (about 20 seconds), iOS joins the glasses' network by itself and
+  Luna describes the photo; she gives up after about 35 seconds. iOS does not leave another
+  working Wi-Fi for the glasses' network, so this works best on mobile data. Otherwise the
+  photo stays on the glasses and Luna says why (one-time setup needed, or the iPhone is
+  probably on another Wi-Fi). With automatic joining the app joins the network itself.
 - Optional, off by default: the glasses' assistant button starts a Luna call while the app
   is open on screen.
 

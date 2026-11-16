@@ -86,8 +86,10 @@ struct LunaCameraError: Error {
 
 /// Phone-side tools for a native call: the glasses camera. Provided by the app shell.
 struct LunaNativeLocalTools {
-    /// One glasses photo (JPEG), already saved to the Library.
-    var capturePhoto: @MainActor () async throws -> Data
+    /// One glasses photo (JPEG), already saved to the Library. A slow capture (HeyCyan glasses
+    /// bringing the photo over their Wi-Fi) calls the progress closure once with a note for
+    /// Luna, so she can tell the user while they wait.
+    var capturePhoto: @MainActor (_ progress: @escaping @MainActor (String) -> Void) async throws -> Data
     /// A short glasses clip, saved to the Library; Luna's summary follows there.
     var recordVideo: @MainActor () async throws -> Void
     /// The call ended: release anything held for it (the warm camera stream).
@@ -161,6 +163,8 @@ final class LunaNativeSession {
     @ObservationIgnored private var tapFormat: AVAudioFormat?
     @ObservationIgnored private var engineRestarts: [TimeInterval] = []
     @ObservationIgnored private var toolTasks: [String: Task<Void, Never>] = [:]
+    /// Local tools that reported they are slow (`localToolIsSlow`), by call id.
+    @ObservationIgnored private var slowLocalTools: Set<String> = []
     /// The tool calls behind `toolTasks`, by id.
     @ObservationIgnored private var toolCalls: [String: LunaNativeToolCall] = [:]
     /// Back-office requests the user talked over: they keep running (and keep their chip)
@@ -334,7 +338,7 @@ final class LunaNativeSession {
             let wasDetached = Set(ids.filter { talkedOver.isDetached($0) })
             let cancelled = talkedOver.cancel(ids, running: toolCalls)
             for id in cancelled {
-                toolTasks.removeValue(forKey: id)?.cancel(); toolCalls[id] = nil
+                toolTasks.removeValue(forKey: id)?.cancel(); toolCalls[id] = nil; slowLocalTools.remove(id)
             }
             tools.removeAll { cancelled.contains($0.id) }
             let detached = ids.filter { talkedOver.isDetached($0) && !wasDetached.contains($0) }
@@ -582,6 +586,7 @@ final class LunaNativeSession {
             }
             guard !Task.isCancelled, let self, generation == self.state.generation else { return }
             self.toolTasks[call.id] = nil; self.toolCalls[call.id] = nil; self.tools.removeAll { $0.id == call.id }
+            self.slowLocalTools.remove(call.id)
             let answering: LunaNativeToolCall
             let cardSource: LunaApprovalSlot.Source
             switch self.talkedOver.finish(call, result: result) {
@@ -700,7 +705,9 @@ final class LunaNativeSession {
         }
         do {
             if call.name == "look" {
-                let jpeg = try await localTools.capturePhoto()
+                let jpeg = try await localTools.capturePhoto { [weak self] note in
+                    self?.localToolIsSlow(call, note: note)
+                }
                 let copy = Self.forModel(jpeg)
                 callPhotos = Array((callPhotos + [copy]).suffix(LunaNativeVoice.maxPhotos))
                 return (result(LunaNativeWire.toolResult(
@@ -714,13 +721,19 @@ final class LunaNativeSession {
         } catch {
             // Fixed code plus the error's type/case only (e.g. GlassesServiceError.notConnected).
             let code = (error as? LunaCameraError)?.code ?? "unknown"
+            // HeyCyan in a call: the photo stayed on the glasses; Luna gets the plain reason.
+            if let fallback = HeyCyanCallLookFallback.allCases.first(where: { $0.lookCode == code }) {
+                return (result(LunaNativeWire.toolFailure(
+                    "A photo was taken with the user's HeyCyan glasses and is saved on the glasses, but it could not be brought to the phone, so no image is attached. "
+                    + "Tell the user briefly, in your own words: \"\(fallback.sentence)\" Never guess what is in front of them. Do not call look again unless they ask.")),
+                    nil, "camera_error:\(code)")
+            }
             let message = switch code {
             case "camera_off_in_settings": "The user has turned off camera use during calls in Settings. Tell them; do not retry."
             case "glasses_not_worn": "The user is not wearing the glasses right now. Ask them to put them on, then look again."
             case "glasses_folded": "The user's glasses are folded. Ask them to open and wear them, then look again."
             case "glasses_too_hot": "The glasses are too hot to use the camera. Tell the user to give them a few minutes; do not retry now."
             case "heycyan_photo_not_transferred": "A photo was taken with the user's HeyCyan glasses and is saved on the glasses, but it could not be brought to the phone, so no image is attached. Tell them in one short sentence; never guess what is in it. Do not retry unless they ask."
-            case "heycyan_photo_kept_in_call": "A photo was taken with the user's HeyCyan glasses and saved on the glasses. This version of Luna can't bring it to the phone during a call, so no image is attached. Say so in one short sentence, and that after the call they can bring a photo over in the You tab under Glasses with Take and fetch. Never guess what is in it; do not retry."
             case "heycyan_photo_unconfirmed": "The user's HeyCyan glasses did not confirm a new photo, so no image is attached. Tell them briefly; never guess what is in front of them."
             case "heycyan_not_connected": "The user's HeyCyan glasses are not connected. Ask them to connect them in the You tab, then try again."
             case "heycyan_busy": "The user's HeyCyan glasses are still bringing an earlier photo to the phone, so no image is attached. Tell them briefly and offer to look again in a moment; never guess."
@@ -1085,10 +1098,23 @@ final class LunaNativeSession {
     }
 
     /// True while Luna's back office is working for the user: a delegated request or an
-    /// approved action. Local look/record have their own on-screen progress.
+    /// approved action, or a local tool that said it is slow (a HeyCyan look bringing the photo
+    /// over Wi-Fi). Other local look/record have their own on-screen progress.
     /// A talked-over request does not count: the conversation has moved on to other things.
     private var backOfficeWorking: Bool {
-        approvalBusy || tools.contains { !LunaNativeVoice.localTools.contains($0.name) && !talkedOver.isDetached($0.id) }
+        approvalBusy || tools.contains {
+            (!LunaNativeVoice.localTools.contains($0.name) || slowLocalTools.contains($0.id)) && !talkedOver.isDetached($0.id)
+        }
+    }
+
+    /// A local tool (a HeyCyan look) is taking long: the working tone covers the wait, and Luna
+    /// hears a short note so she can tell the user (sent only while the call is live).
+    private func localToolIsSlow(_ call: LunaNativeToolCall, note: String) {
+        guard toolCalls[call.id] != nil else { return }
+        slowLocalTools.insert(call.id)
+        trace("tool.progress", detail: "name=\(Self.toolLabel(call.name)) note=coming_over")
+        guard let socket, [.listening, .responding, .speaking].contains(state.phase) else { return }
+        Task { try? await socket.sendMessage(LunaNativeWire.text("[Update from Luna's phone] " + note)) }
     }
 
     /// A soft cue on the glasses while the back office works and nobody is talking: first
@@ -1338,6 +1364,7 @@ final class LunaNativeSession {
         player?.stop(); engine?.stop()
         // The call is over: talked-over requests stop with it.
         toolTasks.values.forEach { $0.cancel() }; toolTasks = [:]; toolCalls = [:]; tools = []; pendingAsk = nil
+        slowLocalTools = []
         talkedOver.reset()
         clearApproval(); approvalBusy = false
         if let localTools { Task { await localTools.endCall() } }
