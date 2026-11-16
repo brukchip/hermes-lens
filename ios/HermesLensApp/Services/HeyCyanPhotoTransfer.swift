@@ -100,11 +100,7 @@ final class HeyCyanPhotoTransfer {
             return .busy
         }
         let plan = HeyCyanFetchPlan.plan(for: context, automaticJoinAvailable: Self.automaticJoinAvailable)
-        let budgetSeconds = switch plan {
-        case .automaticJoin(let seconds), .manualJoin(let seconds): seconds
-        case .keepOnGlasses: HeyCyanFetchPlan.callBudgetSeconds
-        }
-        let deadline = startedAt + .seconds(budgetSeconds)
+        let deadline = startedAt + .seconds(plan.budgetSeconds)
         stage = .takingPhoto
         manualJoin = nil
         stopRequested = false
@@ -122,7 +118,7 @@ final class HeyCyanPhotoTransfer {
         guard fetch else { return .keptOnGlasses(photosOnGlasses: count, reason: nil) }
         let manual: Bool
         switch plan {
-        case .keepOnGlasses:
+        case .keepOnGlasses, .knownNetwork:
             // A call cannot wait for the user to join a Wi-Fi network in Settings.
             trace("stage=plan ms=0 result=kept_on_glasses automatic_join=false")
             return .keptForLater(photosOnGlasses: count)

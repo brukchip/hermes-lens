@@ -462,7 +462,7 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
 
 @Test func withoutAutomaticJoinALookInACallKeepsThePhotoOnTheGlasses() {
     #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: false) == .keepOnGlasses)
-    #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: true) == .automaticJoin(budgetSeconds: 25))
+    #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: true) == .automaticJoin(budgetSeconds: 35))
     #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: true) == .automaticJoin(budgetSeconds: 45))
     #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: false) == .manualJoin(budgetSeconds: 220))
     // The manual budget covers the whole 3-minute wait plus the photo and the download.
@@ -520,4 +520,70 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     join.end()
     #expect(join.phase == .gaveUp)
     #expect(!join.shouldPoll(at: 1))
+}
+
+// MARK: A look in a call
+
+@Test func aCallLooksOverAKnownNetworkWithinThirtyFiveSeconds() {
+    #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: false, networkKnown: true) == .knownNetwork(budgetSeconds: 35))
+    #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: false, networkKnown: false) == .keepOnGlasses)
+    // The entitlement wins over a known network; the Photo flow is unchanged by it.
+    #expect(HeyCyanFetchPlan.plan(for: .call, automaticJoinAvailable: true, networkKnown: true) == .automaticJoin(budgetSeconds: 35))
+    #expect(HeyCyanFetchPlan.plan(for: .interactive, automaticJoinAvailable: false, networkKnown: true) == .manualJoin(budgetSeconds: 220))
+    #expect(HeyCyanFetchPlan.knownNetwork(budgetSeconds: 35).traceLabel == "in_call_known")
+    #expect(HeyCyanFetchPlan.keepOnGlasses.traceLabel == "in_call_unknown")
+    #expect(HeyCyanFetchPlan.keepOnGlasses.budgetSeconds == 35)
+    #expect(HeyCyanFetchPlan.manualJoin(budgetSeconds: 220).budgetSeconds == 220)
+    // The L802's address came 15–19 s into the transfer; the whole fetch took 21–27 s.
+    #expect(HeyCyanFetchPlan.callBudgetSeconds >= 30)
+}
+
+@Test func knownNetworksKeepOnlyTheNameByGlasses() throws {
+    var store = HeyCyanKnownNetworks()
+    #expect(!store.knows("GLASSES-A"))
+    store.remember(ssid: "Glasses 0A1B2C3D4E5F", for: "GLASSES-A")
+    store.remember(ssid: "", for: "GLASSES-B")
+    store.remember(ssid: "Glasses_1234", for: nil)
+    #expect(store.ssid(for: "GLASSES-A") == "Glasses 0A1B2C3D4E5F")
+    #expect(!store.knows("GLASSES-B"))
+    #expect(!store.knows(nil))
+    store.remember(ssid: "Glasses_5678", for: "GLASSES-A")
+    #expect(store.ssid(for: "GLASSES-A") == "Glasses_5678")
+
+    let data = try #require(store.encoded())
+    #expect(HeyCyanKnownNetworks.decoded(from: data) == store)
+    #expect(!String(decoding: data, as: UTF8.self).lowercased().contains("password"))
+    #expect(HeyCyanKnownNetworks.decoded(from: nil) == HeyCyanKnownNetworks())
+    #expect(HeyCyanKnownNetworks.decoded(from: Data("nonsense".utf8)) == HeyCyanKnownNetworks())
+
+    store.forget("GLASSES-A")
+    #expect(!store.knows("GLASSES-A"))
+    store.forget(nil)
+}
+
+@Test func theFallbackSaysWhyThePhotoStayedOnTheGlasses() {
+    typealias F = HeyCyanCallLookFallback
+    // An unknown or changed network always means the one-time setup.
+    #expect(F.choose(networkKnown: false, cause: .glassesNotFound, onWiFi: true, onGlassesWiFi: false) == .setupNeeded)
+    #expect(F.choose(networkKnown: true, cause: .networkChanged, onWiFi: false, onGlassesWiFi: false) == .setupNeeded)
+    // Out of time on another Wi-Fi: the likely cause.
+    #expect(F.choose(networkKnown: true, cause: .glassesNotFound, onWiFi: true, onGlassesWiFi: false) == .onOtherWiFi)
+    // Out of time on mobile data, or on the glasses' own Wi-Fi without an answer.
+    #expect(F.choose(networkKnown: true, cause: .glassesNotFound, onWiFi: false, onGlassesWiFi: false) == .notReachable)
+    #expect(F.choose(networkKnown: true, cause: .glassesNotFound, onWiFi: true, onGlassesWiFi: true) == .notReachable)
+    #expect(F.choose(networkKnown: true, cause: .other, onWiFi: true, onGlassesWiFi: false) == .failed)
+
+    #expect(F.onOtherWiFi.sentence == "I took the photo but couldn't bring it over. Your iPhone is probably on another Wi-Fi. It's saved on the glasses.")
+    for fallback in [F.setupNeeded, .onOtherWiFi, .notReachable, .failed] {
+        #expect(fallback.sentence.contains("saved on the glasses"))
+        #expect(fallback.lookCode.hasPrefix("heycyan_look_"))
+    }
+    #expect(F.setupNeeded.sentence.contains("You › Glasses"))
+}
+
+@Test func thePhoneIsOnTheGlassesNetworkWhenItsSubnetHoldsTheGlasses() {
+    #expect(HeyCyanGlassesAddress.isOnGlassesNetwork(address: "192.168.31.23", netmask: "255.255.255.0", glassesAddress: "192.168.31.1"))
+    #expect(HeyCyanGlassesAddress.isOnGlassesNetwork(address: "192.168.31.23", netmask: "255.255.255.0", glassesAddress: nil))
+    #expect(!HeyCyanGlassesAddress.isOnGlassesNetwork(address: "192.168.1.40", netmask: "255.255.255.0", glassesAddress: "192.168.31.1"))
+    #expect(!HeyCyanGlassesAddress.isOnGlassesNetwork(address: nil, netmask: nil, glassesAddress: "192.168.31.1"))
 }
