@@ -2,7 +2,8 @@ import Foundation
 import HermesLensCore
 
 /// Which glasses Luna uses. Ray-Ban Meta is the default and works exactly as before; HeyCyan
-/// camera glasses are a beta (connect, battery, take a photo and bring it over the glasses' Wi-Fi).
+/// camera glasses are a beta (connect, battery, a small photo over Bluetooth for a call's look,
+/// and a full-size photo over the glasses' Wi-Fi).
 enum GlassesBrand: String, CaseIterable, Identifiable, Sendable {
     case rayBanMeta
     case heyCyan
@@ -27,8 +28,9 @@ struct GlassesStatus: Equatable {
     var isConnected: Bool
     /// 0–100 when the glasses have reported it.
     var battery: Int?
-    /// Whether a photo reaches this iPhone. HeyCyan photos come over the glasses' own Wi-Fi
-    /// (beta), so a HeyCyan photo may still stay on the glasses when that fails.
+    /// Whether a photo reaches this iPhone. HeyCyan photos come over Bluetooth (a call's look,
+    /// a small photo) or the glasses' own Wi-Fi (full size), both beta, so a HeyCyan photo may
+    /// still stay on the glasses when that fails.
     var photosReachPhone: Bool
 }
 
@@ -39,9 +41,6 @@ enum HeyCyanPhotoOutcome: Equatable {
     /// Taken and confirmed by the photo count; it is stored on the glasses. `reason` says why it
     /// could not be brought over (nil when that was not asked for).
     case keptOnGlasses(photosOnGlasses: Int, reason: String?)
-    /// Taken in a call but not brought over (unknown network, phone on another Wi-Fi, out of
-    /// time…): it stays on the glasses, and Luna says why (`HeyCyanCallLookFallback`).
-    case callFallback(HeyCyanCallLookFallback, photosOnGlasses: Int)
     /// The command went out but the photo count did not go up.
     case unconfirmed
     case notConnected
@@ -55,23 +54,10 @@ enum HeyCyanPhotoOutcome: Equatable {
         case .fetched: "Photo taken and brought to this iPhone."
         case .keptOnGlasses(let count, nil): "Photo taken and saved on your glasses (\(count) there now)."
         case .keptOnGlasses(_, let reason?): "I took the photo, but couldn't bring it to your phone: \(reason)"
-        case .callFallback(let fallback, _): fallback.sentence
         case .unconfirmed: "The glasses didn't confirm a new photo. Check them and try again."
         case .notConnected: "Your HeyCyan glasses aren't connected. Connect them in You › Glasses."
         case .busy: "I'm still bringing the last photo over from your glasses. Try again in a moment."
         case .failed(let reason): reason
-        }
-    }
-
-    /// The fixed code a call's `look` reports (`LunaCameraError`) when no image comes, never content.
-    var lookCode: String {
-        switch self {
-        case .fetched: "heycyan_photo_fetched"
-        case .keptOnGlasses: "heycyan_photo_not_transferred"
-        case .callFallback(let fallback, _): fallback.lookCode
-        case .unconfirmed, .failed: "heycyan_photo_unconfirmed"
-        case .notConnected: "heycyan_not_connected"
-        case .busy: "heycyan_busy"
         }
     }
 }

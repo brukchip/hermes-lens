@@ -47,14 +47,6 @@ public enum HeyCyanGlassesAddress {
         return result
     }
 
-    /// `address & netmask`, or nil for malformed input or a netmask that is not contiguous.
-    static func network(address: String, netmask: String) -> UInt32? {
-        guard let a = octets(address), let m = octets(netmask) else { return nil }
-        let maskValue = m.reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
-        guard maskValue != 0, (~maskValue) & (~maskValue &+ 1) == 0 else { return nil }
-        return a.reduce(UInt32(0)) { $0 << 8 | UInt32($1) } & maskValue
-    }
-
     /// `http://<host>/files/media.config`.
     public static func mediaListURL(host: String) -> URL? { fileURL(host: host, name: "media.config") }
 
@@ -149,45 +141,23 @@ public enum HeyCyanMediaList {
 ///
 /// Joining the glasses' Wi-Fi from the app needs the Hotspot Configuration entitlement, which
 /// personal (free) developer teams cannot use. Without it the user joins the network in
-/// Settings › Wi-Fi while the app shows its name and password: fine when they are looking at
-/// the screen, far too slow for a look in a call. But once the user has joined it, iOS
-/// remembers the hidden network and joins it by itself when the glasses open it (and the
-/// phone is not on another Wi-Fi), so a call's look then just waits for the glasses to answer.
+/// Settings › Wi-Fi while the app shows its name and password, which is fine because the Photo
+/// flow and the Settings test happen with the user looking at the screen. (A call's look does
+/// not use Wi-Fi: it pulls the small AI photo over Bluetooth, `HeyCyanAIPhoto`.)
 public enum HeyCyanFetchPlan: Equatable, Sendable {
-    public enum Context: Sendable {
-        /// A call's `look`: about 25 s in total, never waiting for a person.
-        case call
-        /// The Photo flow or the Settings test: the user is watching the screen.
-        case interactive
-    }
-
     /// The app joins the glasses' Wi-Fi itself (one system prompt).
     case automaticJoin(budgetSeconds: Int)
     /// The user joins it in Settings › Wi-Fi; the app waits for the glasses to answer.
     case manualJoin(budgetSeconds: Int)
-    /// In a call, the phone already knows the glasses' network (`HeyCyanKnownNetworks`): no
-    /// join, the app waits for iOS to join it and for the glasses to answer.
-    case knownNetwork(budgetSeconds: Int)
-    /// No transfer: the photo stays on the glasses.
-    case keepOnGlasses
 
-    /// A call's look in total. The L802 reports its Wi-Fi address 15–19 s into the transfer and
-    /// a fetch took 21–27 s on 2026-11-16, so 25 s was too tight.
-    public static let callBudgetSeconds = 35
     public static let automaticBudgetSeconds = 45
     /// The photo (up to ~10 s), the credentials (up to 6 s), the 3-minute join wait and the
     /// download.
     public static let manualBudgetSeconds = 220
 
-    /// `networkKnown`: this iPhone joined the paired glasses' network before.
-    public static func plan(for context: Context, automaticJoinAvailable: Bool,
-                            networkKnown: Bool = false) -> HeyCyanFetchPlan {
-        switch (context, automaticJoinAvailable) {
-        case (.call, true): .automaticJoin(budgetSeconds: callBudgetSeconds)
-        case (.call, false): networkKnown ? .knownNetwork(budgetSeconds: callBudgetSeconds) : .keepOnGlasses
-        case (.interactive, true): .automaticJoin(budgetSeconds: automaticBudgetSeconds)
-        case (.interactive, false): .manualJoin(budgetSeconds: manualBudgetSeconds)
-        }
+    public static func plan(automaticJoinAvailable: Bool) -> HeyCyanFetchPlan {
+        automaticJoinAvailable ? .automaticJoin(budgetSeconds: automaticBudgetSeconds)
+            : .manualJoin(budgetSeconds: manualBudgetSeconds)
     }
 
     /// For `heycyan.transfer stage=plan result=…`.
@@ -195,16 +165,13 @@ public enum HeyCyanFetchPlan: Equatable, Sendable {
         switch self {
         case .automaticJoin: "automatic_join"
         case .manualJoin: "manual_join"
-        case .knownNetwork: "in_call_known"
-        case .keepOnGlasses: "in_call_unknown"
         }
     }
 
     /// The whole budget in seconds, counted from the request.
     public var budgetSeconds: Int {
         switch self {
-        case .automaticJoin(let seconds), .manualJoin(let seconds), .knownNetwork(let seconds): seconds
-        case .keepOnGlasses: Self.callBudgetSeconds
+        case .automaticJoin(let seconds), .manualJoin(let seconds): seconds
         }
     }
 }

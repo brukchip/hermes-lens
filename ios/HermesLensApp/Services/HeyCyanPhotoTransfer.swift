@@ -1,6 +1,5 @@
 import Foundation
 import HermesLensCore
-import Network
 import NetworkExtension
 import Observation
 import UIKit
@@ -18,10 +17,7 @@ import UIKit
 ///    teams) the app joins it itself: one system prompt per password, join once, hidden.
 ///    Without it the app shows a card with the network's name and password, the user joins it
 ///    in Settings › Wi-Fi › Other…, and the app polls until the glasses answer (3 minutes).
-///    A look in a call has no time for that: without the entitlement it brings the photo over
-///    only when this iPhone joined the glasses' network before (iOS then joins it by itself
-///    when the phone is not on another Wi-Fi), and otherwise keeps it on the glasses
-///    (`HeyCyanFetchPlan`, `HeyCyanCallLookFallback`).
+///    (A look in a call does not use Wi-Fi: `takeAIPhoto` pulls a small photo over Bluetooth.)
 /// 4. Plain HTTP: `http://<glasses>/files/media.config` lists the files; the newest JPEG is
 ///    downloaded from `/files/<name>` (at most 15 MB).
 /// 5. Always, success or failure: leave transfer mode (`0x41 02 01 09`) and remove the Wi-Fi
@@ -39,7 +35,6 @@ final class HeyCyanPhotoTransfer {
         case openingGlassesWiFi
         case joiningWiFi
         case waitingForManualJoin
-        case waitingForKnownNetwork
         case findingGlasses
         case downloading
         /// A call's look: the small AI photo over Bluetooth.
@@ -52,7 +47,6 @@ final class HeyCyanPhotoTransfer {
             case .openingGlassesWiFi: "Asking the glasses for the photo"
             case .joiningWiFi: "Joining your glasses' Wi-Fi. Tap Join if the iPhone asks."
             case .waitingForManualJoin: "Waiting for you to join the glasses' Wi-Fi"
-            case .waitingForKnownNetwork: "Waiting for the iPhone to join the glasses' Wi-Fi"
             case .findingGlasses: "Finding the glasses on their Wi-Fi"
             case .downloading: "Bringing the photo to this iPhone"
             case .bringingAIPhoto: "Bringing a small photo over Bluetooth"
@@ -98,23 +92,15 @@ final class HeyCyanPhotoTransfer {
         self.glasses = glasses
     }
 
-    /// Sent to Luna in a call once the photo is taken and is coming over a known network.
-    static let comingOverNote = "The photo was taken on the user's HeyCyan glasses and is coming over to the phone now; that takes about 20 seconds. Tell the user so in one short sentence (for example: got the photo, bringing it over from your glasses, about 20 seconds), then wait: the look result follows by itself. Do not call look again."
-
-    /// Takes one photo on the glasses and, when `fetch` is true, brings it to this iPhone as
-    /// `HeyCyanFetchPlan` allows for `context`, within the plan's budget counted from
-    /// `startedAt` (a reconnect before it included). `knownNetwork`: the paired glasses'
-    /// network this iPhone joined before. `onComingOver` runs once the photo is taken and a
-    /// call's transfer over a known network starts.
-    func takePhoto(fetch: Bool, context: HeyCyanFetchPlan.Context,
-                   startedAt: ContinuousClock.Instant = .now, knownNetwork: String? = nil,
-                   onComingOver: (@MainActor () -> Void)? = nil) async -> HeyCyanPhotoOutcome {
+    /// Takes one photo on the glasses and, when `fetch` is true, brings it to this iPhone over
+    /// their Wi-Fi as `HeyCyanFetchPlan` allows, within the plan's budget counted from
+    /// `startedAt` (a reconnect before it included).
+    func takePhoto(fetch: Bool, startedAt: ContinuousClock.Instant = .now) async -> HeyCyanPhotoOutcome {
         guard stage == nil else {
             trace("stage=start ms=0 result=busy")
             return .busy
         }
-        let plan = HeyCyanFetchPlan.plan(for: context, automaticJoinAvailable: Self.automaticJoinAvailable,
-                                         networkKnown: knownNetwork != nil)
+        let plan = HeyCyanFetchPlan.plan(automaticJoinAvailable: Self.automaticJoinAvailable)
         if fetch { trace("stage=plan ms=0 result=\(plan.traceLabel) budget_s=\(plan.budgetSeconds)") }
         let deadline = startedAt + .seconds(plan.budgetSeconds)
         stage = .takingPhoto
@@ -132,29 +118,16 @@ final class HeyCyanPhotoTransfer {
         guard photo.confirmed else { return .unconfirmed }
         let count = photo.after.photos
         guard fetch else { return .keptOnGlasses(photosOnGlasses: count, reason: nil) }
-        let mode: JoinMode
+        let manual: Bool
         switch plan {
-        case .keepOnGlasses:
-            // A call cannot wait for the user to join a Wi-Fi network in Settings.
-            trace("stage=fallback ms=0 result=\(HeyCyanCallLookFallback.setupNeeded.traceLabel)")
-            return .callFallback(.setupNeeded, photosOnGlasses: count)
-        case .automaticJoin: mode = .automatic
-        case .manualJoin: mode = .manual
-        case .knownNetwork:
-            mode = .known(knownNetwork ?? "")
-            onComingOver?()
+        case .automaticJoin: manual = false
+        case .manualJoin: manual = true
         }
         do {
-            let (jpeg, network) = try await fetchNewestPhoto(deadline: deadline, mode: mode)
+            let (jpeg, network) = try await fetchNewestPhoto(deadline: deadline, manual: manual)
             return .fetched(jpeg: jpeg, photosOnGlasses: count, network: network)
         } catch {
-            guard case .known = mode else { return .keptOnGlasses(photosOnGlasses: count, reason: error.reason) }
-            let fallback = HeyCyanCallLookFallback.choose(
-                networkKnown: true, cause: error.callLookCause,
-                onWiFi: lastFailureWiFi?.onWiFi ?? false, onGlassesWiFi: lastFailureWiFi?.onGlassesWiFi ?? false)
-            trace("stage=fallback ms=0 result=\(fallback.traceLabel) cause=\(error.traceLabel) "
-                + "on_wifi=\(lastFailureWiFi?.onWiFi ?? false) on_glasses_wifi=\(lastFailureWiFi?.onGlassesWiFi ?? false)")
-            return .callFallback(fallback, photosOnGlasses: count)
+            return .keptOnGlasses(photosOnGlasses: count, reason: error.reason)
         }
     }
 
@@ -169,20 +142,6 @@ final class HeyCyanPhotoTransfer {
         defer { stage = nil }
         return try await glasses.captureAIPhoto()
     }
-
-    /// How the phone gets onto the glasses' network.
-    private enum JoinMode: Equatable {
-        /// The app joins it (Hotspot Configuration entitlement).
-        case automatic
-        /// The user joins it in Settings while the card shows.
-        case manual
-        /// iOS joins it by itself: this iPhone joined the network with this name before.
-        case known(String)
-    }
-
-    /// The phone's Wi-Fi when a known-network transfer failed, measured before transfer mode
-    /// is left (the glasses' network goes away then).
-    @ObservationIgnored private var lastFailureWiFi: (onWiFi: Bool, onGlassesWiFi: Bool)?
 
     // MARK: The transfer
 
@@ -199,15 +158,14 @@ final class HeyCyanPhotoTransfer {
     }
 
     /// The photo and the name of the network it came over.
-    private func fetchNewestPhoto(deadline: ContinuousClock.Instant, mode: JoinMode) async throws(HeyCyanTransferFailure) -> (Data, String) {
+    private func fetchNewestPhoto(deadline: ContinuousClock.Instant, manual: Bool) async throws(HeyCyanTransferFailure) -> (Data, String) {
         let started = clock.now
         var joinedSSID: String?
         var enteredTransferMode = false
         credentialsAt = nil
         wifiIPTraced = false
-        lastFailureWiFi = nil
         do {
-            let fetched = try await transfer(deadline: deadline, mode: mode, enteredTransferMode: &enteredTransferMode,
+            let fetched = try await transfer(deadline: deadline, manual: manual, enteredTransferMode: &enteredTransferMode,
                                              joinedSSID: &joinedSSID)
             traceWiFiIP(final: true)
             cleanUp(enteredTransferMode: enteredTransferMode, joinedSSID: joinedSSID)
@@ -215,19 +173,13 @@ final class HeyCyanPhotoTransfer {
             return fetched
         } catch {
             traceWiFiIP(final: true)
-            if case .known = mode, error != .cancelled {
-                let onWiFi = await HeyCyanLocalNetwork.isOnWiFi()
-                let address = HeyCyanLocalNetwork.wifiAddress()
-                lastFailureWiFi = (onWiFi, HeyCyanGlassesAddress.isOnGlassesNetwork(
-                    address: address?.address, netmask: address?.netmask, glassesAddress: glasses.reportedWiFiAddress))
-            }
             cleanUp(enteredTransferMode: enteredTransferMode, joinedSSID: joinedSSID)
             trace("stage=total ms=\(ms(since: started)) result=\(error.traceLabel)")
             throw error
         }
     }
 
-    private func transfer(deadline: ContinuousClock.Instant, mode: JoinMode, enteredTransferMode: inout Bool,
+    private func transfer(deadline: ContinuousClock.Instant, manual: Bool, enteredTransferMode: inout Bool,
                           joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> (Data, String) {
         // 1. Transfer mode: the glasses' Wi-Fi name and password over Bluetooth.
         stage = .openingGlassesWiFi
@@ -252,29 +204,11 @@ final class HeyCyanPhotoTransfer {
         try checkTime(deadline, need: .seconds(6))
 
         let found: Found
-        switch mode {
-        case .manual:
+        if manual {
             // 3–4. The user joins in Settings › Wi-Fi; the app polls until the glasses answer.
             found = try await waitForManualJoin(credentials, deadline: deadline)
-        case .automatic:
+        } else {
             found = try await joinAndFind(credentials, deadline: deadline, joinedSSID: &joinedSSID)
-        case .known(let ssid):
-            // 3–4. iOS joins the remembered network by itself (not while the phone is on another
-            // Wi-Fi); the app only polls until the glasses answer.
-            guard credentials.ssid == ssid else {
-                trace("stage=known_network ms=0 result=ssid_changed")
-                throw .networkChanged
-            }
-            stage = .waitingForKnownNetwork
-            let stageStart = clock.now
-            do {
-                found = try await findGlasses(deadline: deadline)
-            } catch {
-                trace("stage=known_network ms=\(ms(since: stageStart)) result=\(error.traceLabel)")
-                throw error
-            }
-            trace("stage=known_network ms=\(ms(since: stageStart)) result=ok ip=\(found.host) source=\(found.source) "
-                + "rounds=\(found.rounds) file_count=\(found.fileCount)")
         }
 
         // 5. Download the newest photo.
@@ -637,17 +571,6 @@ enum HeyCyanTransferFailure: Error, Equatable {
     case manualJoinTimedOut
     /// The user tapped Stop on the manual join card.
     case stopped
-    /// The glasses opened a network other than the one this iPhone knows.
-    case networkChanged
-
-    /// For `HeyCyanCallLookFallback`.
-    var callLookCause: HeyCyanCallLookFallback.Cause {
-        switch self {
-        case .glassesNotFound, .outOfTime: .glassesNotFound
-        case .networkChanged: .networkChanged
-        default: .other
-        }
-    }
 
     var reason: String {
         switch self {
@@ -668,7 +591,6 @@ enum HeyCyanTransferFailure: Error, Equatable {
         case .cancelled: "it was stopped."
         case .manualJoinTimedOut: "the glasses didn't answer on their Wi-Fi within 3 minutes."
         case .stopped: "you stopped it."
-        case .networkChanged: "the glasses opened a different Wi-Fi than the one this iPhone knows."
         }
     }
 
@@ -691,22 +613,7 @@ enum HeyCyanTransferFailure: Error, Equatable {
         case .cancelled: "cancelled"
         case .manualJoinTimedOut: "manual_join_timeout"
         case .stopped: "stopped"
-        case .networkChanged: "network_changed"
         }
-    }
-}
-
-/// True for the first caller only, from any thread.
-private final class OnceFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var claimed = false
-
-    func claim() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if claimed { return false }
-        claimed = true
-        return true
     }
 }
 
@@ -731,11 +638,6 @@ private extension Duration {
 /// "Access Wi-Fi Information" entitlement: the subnet's first host, the usual gateway.
 enum HeyCyanLocalNetwork {
     static func wifiGateway() -> String? {
-        wifiAddress().flatMap { HeyCyanGlassesAddress.firstHost(address: $0.address, netmask: $0.netmask) }
-    }
-
-    /// The phone's IPv4 address and netmask on Wi-Fi (`en0`), when it has one.
-    static func wifiAddress() -> (address: String, netmask: String)? {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return nil }
         defer { freeifaddrs(list) }
@@ -745,32 +647,9 @@ enum HeyCyanLocalNetwork {
                   let address = entry.ifa_addr, address.pointee.sa_family == sa_family_t(AF_INET),
                   let netmask = entry.ifa_netmask,
                   let addressText = ipv4(address), let netmaskText = ipv4(netmask) else { continue }
-            return (addressText, netmaskText)
+            return HeyCyanGlassesAddress.firstHost(address: addressText, netmask: netmaskText)
         }
         return nil
-    }
-
-    /// Whether the phone is on a Wi-Fi network right now: the current path has a Wi-Fi
-    /// interface (`NWPathMonitor`, interface type only; the network's name would need an
-    /// entitlement), or `en0` has an address. Answers within a second.
-    static func isOnWiFi() async -> Bool {
-        let pathHasWiFi = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            let monitor = NWPathMonitor()
-            let once = OnceFlag()
-            let queue = DispatchQueue(label: "heycyan.path")
-            monitor.pathUpdateHandler = { path in
-                guard once.claim() else { return }
-                monitor.cancel()
-                continuation.resume(returning: path.availableInterfaces.contains { $0.type == .wifi })
-            }
-            monitor.start(queue: queue)
-            queue.asyncAfter(deadline: .now() + 1) {
-                guard once.claim() else { return }
-                monitor.cancel()
-                continuation.resume(returning: false)
-            }
-        }
-        return pathHasWiFi || wifiAddress() != nil
     }
 
     private static func ipv4(_ socketAddress: UnsafeMutablePointer<sockaddr>) -> String? {

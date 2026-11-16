@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// You › Glasses when HeyCyan (beta) is chosen: scan, pick, connect or forget, battery, a test
-/// photo that stays on the glasses, and a test photo brought to this iPhone over the glasses'
-/// Wi-Fi (shown as a thumbnail only: nothing is saved or sent, so no server is needed). Builds
-/// without the Hotspot Configuration entitlement ask the user to join that Wi-Fi in Settings
-/// (`HeyCyanJoinCard`).
+/// photo that stays on the glasses, and a full-size test photo brought to this iPhone over the
+/// glasses' Wi-Fi (shown as a thumbnail only: nothing is saved or sent, so no server is
+/// needed). Builds without the Hotspot Configuration entitlement ask the user to join that
+/// Wi-Fi in Settings (`HeyCyanJoinCard`). A call's look needs none of this: it brings a small
+/// photo over Bluetooth.
 struct HeyCyanSettingsRows: View {
     @Environment(AppModel.self) private var model
     @State private var testPhotoMessage: String?
@@ -13,7 +14,6 @@ struct HeyCyanSettingsRows: View {
     @State private var testPhoto: UIImage?
     @State private var testPhotoDetail: String?
     @State private var pickedID: UUID?
-    @State private var networkForgotten = false
 
     static let warning = "These glasses accept Bluetooth commands from anyone nearby. Use them for testing, not for anything private."
 
@@ -52,6 +52,10 @@ struct HeyCyanSettingsRows: View {
                 }
                 .disabled(isTakingTestPhoto || model.heyCyanTransfer.isBusy)
                 .accessibilityIdentifier("settings.heycyan.fetchPhoto")
+                Text("In a call, Luna's look brings a small photo over Bluetooth in a few seconds, no Wi-Fi needed. Take and fetch brings a full-size photo over the glasses' Wi-Fi.")
+                    .font(.footnote)
+                    .foregroundStyle(LunaColor.secondaryText)
+                    .accessibilityIdentifier("settings.heycyan.photoPaths")
             }
             if model.heyCyanTransfer.manualJoin != nil {
                 HeyCyanJoinCard()
@@ -90,7 +94,6 @@ struct HeyCyanSettingsRows: View {
             }
 
             if settings.heyCyanPeripheralID != nil {
-                knownNetworkRow
                 if !glasses.isConnected {
                     Button(connecting ? "Connecting…" : "Connect") {
                         Task { await model.connectRememberedHeyCyan() }
@@ -157,37 +160,10 @@ struct HeyCyanSettingsRows: View {
         }
     }
 
-    /// Whether a look in a call can bring photos over: this iPhone joined the glasses' Wi-Fi
-    /// once (any successful fetch), so iOS joins it again by itself.
-    @ViewBuilder
-    private var knownNetworkRow: some View {
-        if model.heyCyanKnownNetwork != nil {
-            HStack(spacing: 10) {
-                Label("This iPhone knows the glasses' Wi-Fi ✓", systemImage: "wifi")
-                    .foregroundStyle(LunaColor.success)
-                Spacer(minLength: 0)
-                Button("Forget") {
-                    model.forgetHeyCyanNetwork()
-                    networkForgotten = true
-                }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("settings.heycyan.forgetNetwork")
-            }
-            .accessibilityIdentifier("settings.heycyan.knownNetwork")
-        } else {
-            Text(networkForgotten
-                 ? "Luna no longer uses the glasses' Wi-Fi in calls. To stop this iPhone joining it too, forget it in Settings › Wi-Fi."
-                 : "For looks in calls, do Take and fetch a test photo once: this iPhone then knows the glasses' Wi-Fi.")
-                .font(.footnote)
-                .foregroundStyle(LunaColor.secondaryText)
-                .accessibilityIdentifier("settings.heycyan.knownNetwork.setup")
-        }
-    }
-
     private var statusDetail: String {
         let glasses = model.heyCyan
         if case .unavailable = glasses.state { return glasses.state.displayName }
-        if glasses.isConnected { return "Connected · Photos come over the glasses' Wi-Fi (beta)" }
+        if glasses.isConnected { return "Connected (beta)" }
         if glasses.state == .connecting { return "Connecting" }
         return model.settings.heyCyanPeripheralID == nil ? "Scan and pick your glasses" : "Not connected"
     }
