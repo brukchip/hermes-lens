@@ -33,8 +33,8 @@ struct GlassesStatus: Equatable {
 
 /// What happened to a HeyCyan photo request.
 enum HeyCyanPhotoOutcome: Equatable {
-    /// Taken and brought to this iPhone over the glasses' Wi-Fi.
-    case fetched(jpeg: Data, photosOnGlasses: Int)
+    /// Taken and brought to this iPhone over the glasses' Wi-Fi, named `network`.
+    case fetched(jpeg: Data, photosOnGlasses: Int, network: String)
     /// Taken and confirmed by the photo count; it is stored on the glasses. `reason` says why it
     /// could not be brought over (nil when that was not asked for).
     case keptOnGlasses(photosOnGlasses: Int, reason: String?)

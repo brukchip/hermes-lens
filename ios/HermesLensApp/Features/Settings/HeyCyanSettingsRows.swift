@@ -13,6 +13,7 @@ struct HeyCyanSettingsRows: View {
     @State private var testPhoto: UIImage?
     @State private var testPhotoDetail: String?
     @State private var pickedID: UUID?
+    @State private var networkForgotten = false
 
     static let warning = "These glasses accept Bluetooth commands from anyone nearby. Use them for testing, not for anything private."
 
@@ -89,6 +90,7 @@ struct HeyCyanSettingsRows: View {
             }
 
             if settings.heyCyanPeripheralID != nil {
+                knownNetworkRow
                 if !glasses.isConnected {
                     Button(connecting ? "Connecting…" : "Connect") {
                         Task { await model.connectRememberedHeyCyan() }
@@ -155,6 +157,33 @@ struct HeyCyanSettingsRows: View {
         }
     }
 
+    /// Whether a look in a call can bring photos over: this iPhone joined the glasses' Wi-Fi
+    /// once (any successful fetch), so iOS joins it again by itself.
+    @ViewBuilder
+    private var knownNetworkRow: some View {
+        if model.heyCyanKnownNetwork != nil {
+            HStack(spacing: 10) {
+                Label("This iPhone knows the glasses' Wi-Fi ✓", systemImage: "wifi")
+                    .foregroundStyle(LunaColor.success)
+                Spacer(minLength: 0)
+                Button("Forget") {
+                    model.forgetHeyCyanNetwork()
+                    networkForgotten = true
+                }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("settings.heycyan.forgetNetwork")
+            }
+            .accessibilityIdentifier("settings.heycyan.knownNetwork")
+        } else {
+            Text(networkForgotten
+                 ? "Luna no longer uses the glasses' Wi-Fi in calls. To stop this iPhone joining it too, forget it in Settings › Wi-Fi."
+                 : "For looks in calls, do Take and fetch a test photo once: this iPhone then knows the glasses' Wi-Fi.")
+                .font(.footnote)
+                .foregroundStyle(LunaColor.secondaryText)
+                .accessibilityIdentifier("settings.heycyan.knownNetwork.setup")
+        }
+    }
+
     private var statusDetail: String {
         let glasses = model.heyCyan
         if case .unavailable = glasses.state { return glasses.state.displayName }
@@ -170,7 +199,7 @@ struct HeyCyanSettingsRows: View {
         testPhotoDetail = nil
         let outcome = await model.takeHeyCyanPhoto(fetch: fetch)
         switch outcome {
-        case .fetched(let jpeg, _):
+        case .fetched(let jpeg, _, _):
             if let image = UIImage(data: jpeg) {
                 testPhoto = image
                 let width = Int(image.size.width * image.scale), height = Int(image.size.height * image.scale)

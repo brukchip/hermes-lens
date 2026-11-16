@@ -126,7 +126,8 @@ final class HeyCyanPhotoTransfer {
         case .manualJoin: manual = true
         }
         do {
-            return .fetched(jpeg: try await fetchNewestPhoto(deadline: deadline, manual: manual), photosOnGlasses: count)
+            let (jpeg, network) = try await fetchNewestPhoto(deadline: deadline, manual: manual)
+            return .fetched(jpeg: jpeg, photosOnGlasses: count, network: network)
         } catch {
             return .keptOnGlasses(photosOnGlasses: count, reason: error.reason)
         }
@@ -146,7 +147,8 @@ final class HeyCyanPhotoTransfer {
         manualJoin = nil
     }
 
-    private func fetchNewestPhoto(deadline: ContinuousClock.Instant, manual: Bool) async throws(HeyCyanTransferFailure) -> Data {
+    /// The photo and the name of the network it came over.
+    private func fetchNewestPhoto(deadline: ContinuousClock.Instant, manual: Bool) async throws(HeyCyanTransferFailure) -> (Data, String) {
         let started = clock.now
         var joinedSSID: String?
         var enteredTransferMode = false
@@ -154,12 +156,12 @@ final class HeyCyanPhotoTransfer {
         wifiIPTraced = false
         trace("stage=plan ms=0 result=\(manual ? "manual_join" : "automatic_join")")
         do {
-            let jpeg = try await transfer(deadline: deadline, manual: manual, enteredTransferMode: &enteredTransferMode,
-                                          joinedSSID: &joinedSSID)
+            let fetched = try await transfer(deadline: deadline, manual: manual, enteredTransferMode: &enteredTransferMode,
+                                             joinedSSID: &joinedSSID)
             traceWiFiIP(final: true)
             cleanUp(enteredTransferMode: enteredTransferMode, joinedSSID: joinedSSID)
             trace("stage=total ms=\(ms(since: started)) result=ok")
-            return jpeg
+            return fetched
         } catch {
             traceWiFiIP(final: true)
             cleanUp(enteredTransferMode: enteredTransferMode, joinedSSID: joinedSSID)
@@ -169,7 +171,7 @@ final class HeyCyanPhotoTransfer {
     }
 
     private func transfer(deadline: ContinuousClock.Instant, manual: Bool, enteredTransferMode: inout Bool,
-                          joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> Data {
+                          joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> (Data, String) {
         // 1. Transfer mode: the glasses' Wi-Fi name and password over Bluetooth.
         stage = .openingGlassesWiFi
         let stageStart = clock.now
@@ -215,7 +217,7 @@ final class HeyCyanPhotoTransfer {
                 throw HeyCyanTransferFailure.notAPhoto
             }
             trace("stage=download ms=\(ms(since: downloadStart)) result=ok bytes=\(jpeg.count)")
-            return jpeg
+            return (jpeg, credentials.ssid)
         } catch let failure as HeyCyanTransferFailure {
             throw failure
         } catch {

@@ -304,7 +304,7 @@ final class AppModel {
             // When it cannot be brought over, Luna is told why (by the error's code) instead of
             // being given an image.
             let outcome = await takeHeyCyanPhoto(fetch: true, context: .call)
-            guard case .fetched(let jpeg, _) = outcome else { throw LunaCameraError(code: outcome.lookCode) }
+            guard case .fetched(let jpeg, _, _) = outcome else { throw LunaCameraError(code: outcome.lookCode) }
             VoiceDiagnosticLog.record("glasses.call_frame", "source=heycyan \(Self.imageShape(jpeg))")
             _ = try? await beginArtifact(data: jpeg, kind: .photo, request: "Photo from a Luna call")
             return jpeg
@@ -843,6 +843,7 @@ final class AppModel {
 
     /// Disconnects and forgets the remembered glasses.
     func forgetHeyCyan() {
+        settings.heyCyanKnownNetworks.forget(settings.heyCyanPeripheralID?.uuidString)
         heyCyan.disconnect()
         settings.heyCyanPeripheralID = nil
         settings.heyCyanPeripheralName = nil
@@ -860,7 +861,29 @@ final class AppModel {
             try? await heyCyan.connect(to: id)
         }
         guard heyCyan.isConnected else { return .notConnected }
-        return await heyCyanTransfer.takePhoto(fetch: fetch, context: context, startedAt: started)
+        let outcome = await heyCyanTransfer.takePhoto(fetch: fetch, context: context, startedAt: started)
+        if case .fetched(_, _, let network) = outcome { rememberHeyCyanNetwork(network) }
+        return outcome
+    }
+
+    /// The name of the paired glasses' Wi-Fi when this iPhone has joined it before (a fetch
+    /// worked), so iOS joins it by itself: a look in a call can then bring the photo over.
+    var heyCyanKnownNetwork: String? {
+        settings.heyCyanKnownNetworks.ssid(for: settings.heyCyanPeripheralID?.uuidString)
+    }
+
+    private func rememberHeyCyanNetwork(_ ssid: String) {
+        let glassesID = settings.heyCyanPeripheralID?.uuidString
+        guard settings.heyCyanKnownNetworks.ssid(for: glassesID) != ssid else { return }
+        settings.heyCyanKnownNetworks.remember(ssid: ssid, for: glassesID)
+        VoiceDiagnosticLog.record("heycyan.network", "result=remembered")
+    }
+
+    /// Settings' "Forget": Luna stops counting on the glasses' Wi-Fi in calls. (iOS keeps the
+    /// network until the user forgets it in Settings › Wi-Fi.)
+    func forgetHeyCyanNetwork() {
+        settings.heyCyanKnownNetworks.forget(settings.heyCyanPeripheralID?.uuidString)
+        VoiceDiagnosticLog.record("heycyan.network", "result=forgotten")
     }
 
     /// The Photo and Video flows with HeyCyan glasses: the photo is taken on the glasses, brought
@@ -876,7 +899,7 @@ final class AppModel {
         defer { isWorking = false }
         let outcome = await takeHeyCyanPhoto(fetch: true)
         switch outcome {
-        case .fetched(let jpeg, _):
+        case .fetched(let jpeg, _, _):
             VoiceDiagnosticLog.record("glasses.photo", "source=heycyan \(Self.imageShape(jpeg))")
             do {
                 let id = try await beginArtifact(data: jpeg, kind: .photo, request: request)
