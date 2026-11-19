@@ -18,7 +18,7 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. 0.5.0 makes the plugin and the app harder to confuse (gateway
 > restarts, declines, talking over a request) and adds a setup code. It was tested on Hermes
-> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. 84 plugin tests and 89 app-core
+> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. 85 plugin tests and 89 app-core
 > tests; `hermes plugins validate` passes with one warning (it uses Hermes's approval module).
 
 <p align="center">
