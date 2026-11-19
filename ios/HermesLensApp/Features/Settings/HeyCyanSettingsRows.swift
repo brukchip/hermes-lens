@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 
 /// You › Glasses when HeyCyan (beta) is chosen: scan, pick, connect or forget, battery, a test
@@ -176,9 +177,8 @@ struct HeyCyanSettingsRows: View {
         let outcome = await model.takeHeyCyanPhoto(fetch: fetch)
         switch outcome {
         case .fetched(let jpeg, _):
-            if let image = UIImage(data: jpeg) {
+            if let (image, width, height) = Self.thumbnail(of: jpeg) {
                 testPhoto = image
-                let width = Int(image.size.width * image.scale), height = Int(image.size.height * image.scale)
                 testPhotoDetail = "\(width) × \(height) · \(jpeg.count / 1024) KB · not saved"
                 testPhotoMessage = "Photo taken and brought to this iPhone."
             } else {
@@ -190,5 +190,25 @@ struct HeyCyanSettingsRows: View {
             testPhotoMessage = outcome.message
         }
         isTakingTestPhoto = false
+    }
+
+    /// The longest side of the test photo's thumbnail, in pixels.
+    static let thumbnailMaxPixels = 600
+
+    /// A small thumbnail decoded straight from the JPEG (never the full 3280 × 2464 bitmap) and
+    /// the photo's own pixel size. Nil when the bytes are not an image.
+    private static func thumbnail(of jpeg: Data) -> (UIImage, width: Int, height: Int)? {
+        guard let source = CGImageSourceCreateWithData(jpeg as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixels,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return (UIImage(cgImage: thumbnail), width, height)
     }
 }
