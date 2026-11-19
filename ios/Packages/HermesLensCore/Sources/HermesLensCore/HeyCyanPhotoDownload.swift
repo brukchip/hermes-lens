@@ -102,10 +102,22 @@ public enum HeyCyanMediaList {
     /// `media.config` larger than this is not read.
     public static let maximumListBytes = 256 * 1024
 
+    /// Characters a file list never holds: markup (a router's or captive portal's HTML page
+    /// answers any path with 200), quotes and braces (JSON), and U+FFFD (bytes that were not
+    /// UTF-8).
+    static let nonListCharacters: Set<Unicode.Scalar> = ["<", ">", "\"", "{", "}", "\u{FFFD}"]
+
     /// The file names in `media.config`: one per line, blank lines skipped. A line holding a
-    /// path keeps only its last part; a line with ".." and unsafe names are dropped.
-    public static func fileNames(in text: String) -> [String] {
-        text.split(whereSeparator: \.isNewline).compactMap { line in
+    /// path keeps only its last part; a line with ".." and unsafe names are dropped. Nil when
+    /// the text is not a file list at all (`nonListCharacters`, or a control character other
+    /// than a line break or tab): whatever answered is not the glasses.
+    public static func fileNames(in text: String) -> [String]? {
+        let lineBreaksAndTab: Set<Unicode.Scalar> = ["\n", "\r", "\t"]
+        for scalar in text.unicodeScalars {
+            if nonListCharacters.contains(scalar) { return nil }
+            if scalar.properties.generalCategory == .control, !lineBreaksAndTab.contains(scalar) { return nil }
+        }
+        return text.split(whereSeparator: \.isNewline).compactMap { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.contains("..") else { return nil }
             let name = trimmed.split(separator: "/").last.map(String.init) ?? ""
@@ -199,7 +211,9 @@ public enum HeyCyanFetchPlan: Equatable, Sendable {
 }
 
 /// The manual join card: the app shows the glasses' Wi-Fi name and password and asks the
-/// glasses' HTTP server every `pollInterval` until it answers or `maximumWait` has passed.
+/// glasses' HTTP server every `pollInterval` until it lists a photo or `maximumWait` has passed.
+/// Only an address inside the phone's current subnet is asked (`HeyCyanGlassesAddress
+/// .candidates`), so polls while the phone is still on its usual Wi-Fi count as unanswered.
 /// The glasses' hotspot is hidden, so the user types its name in Settings › Wi-Fi › Other…:
 /// that takes a while, hence 3 minutes.
 /// Times are seconds on one monotonic clock.
@@ -239,8 +253,8 @@ public struct HeyCyanManualJoin: Equatable, Sendable {
         max(0, Self.pollInterval - (now - pollStartedAt))
     }
 
-    /// One poll's result: an answer moves to `connected`; no answer after `maximumWait`
-    /// moves to `gaveUp`. Ignored unless waiting.
+    /// One poll's result: an answer (a file list naming a photo) moves to `connected`; no
+    /// answer after `maximumWait` moves to `gaveUp`. Ignored unless waiting.
     public mutating func recordPoll(answered: Bool, at now: TimeInterval) {
         guard phase == .waitingForJoin else { return }
         polls += 1

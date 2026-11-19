@@ -473,7 +473,26 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     let text = "20250102155119977.JPG\r\n20250102155200001.mp4\n\n  20250102155300002.opus \n/files/20250102155400003.jpg\n../secret.jpg\n"
     #expect(HeyCyanMediaList.fileNames(in: text)
         == ["20250102155119977.JPG", "20250102155200001.mp4", "20250102155300002.opus", "20250102155400003.jpg"])
-    #expect(HeyCyanMediaList.fileNames(in: "").isEmpty)
+    #expect(HeyCyanMediaList.fileNames(in: "") == [])
+}
+
+@Test func aPageThatIsNotAFileListIsRejectedWhole() {
+    // A home router answering every path with 200 and its HTML page must not look like glasses
+    // that list no photo: `<html>` alone would pass as a file name.
+    for text in [
+        "<html>\n<body>Router login</body>\n</html>\n",
+        "<!DOCTYPE html>",
+        "20250102155119977.JPG\n<script>x</script>\n",
+        "{\"files\": [\"a.jpg\"]}",
+        "a.jpg\n\"b.jpg\"\n",
+        "a.jpg\u{0}\n",
+        "a.jpg\u{1B}[0m\n",
+        String(decoding: [0x61, 0x2E, 0x6A, 0x70, 0x67, 0xFF, 0xFE], as: UTF8.self),
+    ] {
+        #expect(HeyCyanMediaList.fileNames(in: text) == nil, "\(text.debugDescription)")
+    }
+    // Tabs and both kinds of line break are fine.
+    #expect(HeyCyanMediaList.fileNames(in: "\ta.jpg\t\r\nb.jpg\r") == ["a.jpg", "b.jpg"])
 }
 
 @Test func theNewestPhotoIsChosenByItsTimestamp() {

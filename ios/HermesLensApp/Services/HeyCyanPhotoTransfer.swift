@@ -296,9 +296,11 @@ final class HeyCyanPhotoTransfer {
 
     // MARK: The manual join card
 
-    /// Steps 3–4 without the entitlement: shows the card and asks every candidate address for
-    /// `media.config` every 1.5 s for up to 3 minutes (`HeyCyanManualJoin`). Background time is
-    /// requested so polling can go on for a while when the user switches to Settings.
+    /// Steps 3–4 without the entitlement: shows the card and asks the glasses' address for
+    /// `media.config` every 1.5 s for up to 3 minutes (`HeyCyanManualJoin`), until a list names
+    /// a photo. Nothing is asked until the phone is on the glasses' subnet, and an answer without
+    /// a photo does not end the wait (the user may still be switching networks). Background time
+    /// is requested so polling can go on for a while when the user switches to Settings.
     private func waitForManualJoin(_ credentials: HeyCyanWiFiCredentials,
                                    deadline: ContinuousClock.Instant) async throws(HeyCyanTransferFailure) -> Found {
         stage = .waitingForManualJoin
@@ -308,12 +310,17 @@ final class HeyCyanPhotoTransfer {
         beginBackgroundTime()
         trace("stage=manual_join ms=0 result=card_shown has_password=\(!credentials.password.isEmpty)")
         var answeredWithoutPhoto: (host: String, fileCount: Int)?
+        var onGlassesSubnet = false
         while state.shouldPoll(at: seconds(clock.now)), remaining(deadline) > .seconds(5), !stopRequested {
             if Task.isCancelled { break }
             let pollStart = seconds(clock.now)
             traceWiFiIP(final: false)
             let reported = glasses.reportedWiFiAddress
             let hosts = HeyCyanGlassesAddress.candidates(reported: reported, phone: HeyCyanLocalNetwork.wifiSubnet())
+            if !hosts.isEmpty, !onGlassesSubnet {
+                onGlassesSubnet = true
+                trace("stage=manual_join ms=\(ms(since: stageStart)) result=on_glasses_subnet polls=\(state.polls)")
+            }
             let result = await Self.probe(hosts, timeout: HeyCyanManualJoin.probeTimeout)
             switch result {
             case .photo(let host, let name, let fileCount):
@@ -325,17 +332,17 @@ final class HeyCyanPhotoTransfer {
                     + "polls=\(state.polls) file_count=\(fileCount)")
                 return Found(host: host, source: source, rounds: state.polls, fileCount: fileCount, photo: name)
             case .noPhoto(let host, let fileCount):
-                state.recordPoll(answered: true, at: seconds(clock.now))
+                // Not an answer yet: keep polling until a photo is listed or time is up.
+                state.recordPoll(answered: false, at: seconds(clock.now))
                 answeredWithoutPhoto = (host, fileCount)
             case .unreachable:
                 state.recordPoll(answered: false, at: seconds(clock.now))
             }
             manualJoin?.state = state
-            if answeredWithoutPhoto != nil { break }
             let now = seconds(clock.now)
             try? await Task.sleep(for: .seconds(state.delayBeforeNextPoll(pollStartedAt: pollStart, now: now)))
         }
-        if let answeredWithoutPhoto {
+        if !stopRequested, !Task.isCancelled, let answeredWithoutPhoto {
             trace("stage=manual_join ms=\(ms(since: stageStart)) result=no_photo_listed ip=\(answeredWithoutPhoto.host) "
                 + "polls=\(state.polls) file_count=\(answeredWithoutPhoto.fileCount)")
             throw .noPhotoListed
@@ -456,9 +463,10 @@ final class HeyCyanPhotoTransfer {
         case unreachable
     }
 
-    /// Asks every candidate address for `media.config` at once, round after round, until one
+    /// Asks the candidate addresses for `media.config` at once, round after round, until one
     /// lists a photo or time runs short. The glasses may report their address late, and the
-    /// joined network may need a moment, so each round rebuilds the list.
+    /// joined network may need a moment, so each round rebuilds the list from the phone's
+    /// current subnet.
     private func findGlasses(deadline: ContinuousClock.Instant) async throws(HeyCyanTransferFailure) -> Found {
         var rounds = 0
         var answeredWithoutPhoto: (host: String, fileCount: Int)?
@@ -493,36 +501,32 @@ final class HeyCyanPhotoTransfer {
         throw Task.isCancelled ? .cancelled : .glassesNotFound
     }
 
-    /// The first host whose file list names a photo; otherwise one that answered without a photo.
+    /// Asks every host at once and waits for all (at most two, each within `timeout`). The
+    /// first host in `hosts` order whose file list names a photo wins, so the glasses' reported
+    /// address is preferred; otherwise the first that listed files without a photo. A reply
+    /// that is not a file list (`HeyCyanMediaList.fileNames` is nil) counts as no answer.
     private nonisolated static func probe(_ hosts: [String], timeout: Double) async -> ProbeResult {
-        await withTaskGroup(of: ProbeResult.self) { group in
-            for host in hosts {
-                group.addTask {
-                    guard let url = HeyCyanGlassesAddress.mediaListURL(host: host),
-                          let data = try? await HeyCyanHTTP.get(url, timeout: timeout, maxBytes: HeyCyanMediaList.maximumListBytes)
-                    else { return .unreachable }
-                    let text = String(decoding: data, as: UTF8.self)
-                    let names = HeyCyanMediaList.fileNames(in: text)
-                    guard let photo = HeyCyanMediaList.newestPhoto(in: names) else {
-                        return .noPhoto(host: host, fileCount: names.count)
-                    }
-                    return .photo(host: host, name: photo, fileCount: names.count)
-                }
+        let results = await withTaskGroup(of: (Int, ProbeResult).self) { group in
+            for (index, host) in hosts.enumerated() {
+                group.addTask { (index, await probeHost(host, timeout: timeout)) }
             }
-            var fallback = ProbeResult.unreachable
-            for await result in group {
-                switch result {
-                case .photo:
-                    group.cancelAll()
-                    return result
-                case .noPhoto:
-                    fallback = result
-                case .unreachable:
-                    break
-                }
-            }
-            return fallback
+            var results = [ProbeResult](repeating: .unreachable, count: hosts.count)
+            for await (index, result) in group { results[index] = result }
+            return results
         }
+        if let photo = results.first(where: { if case .photo = $0 { true } else { false } }) { return photo }
+        return results.first(where: { if case .noPhoto = $0 { true } else { false } }) ?? .unreachable
+    }
+
+    private nonisolated static func probeHost(_ host: String, timeout: Double) async -> ProbeResult {
+        guard let url = HeyCyanGlassesAddress.mediaListURL(host: host),
+              let data = try? await HeyCyanHTTP.get(url, timeout: timeout, maxBytes: HeyCyanMediaList.maximumListBytes),
+              let names = HeyCyanMediaList.fileNames(in: String(decoding: data, as: UTF8.self))
+        else { return .unreachable }
+        guard let photo = HeyCyanMediaList.newestPhoto(in: names) else {
+            return .noPhoto(host: host, fileCount: names.count)
+        }
+        return .photo(host: host, name: photo, fileCount: names.count)
     }
 
     // MARK: Time
