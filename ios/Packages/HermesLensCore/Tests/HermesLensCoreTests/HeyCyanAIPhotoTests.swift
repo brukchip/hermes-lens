@@ -162,26 +162,43 @@ private func fakeJPEG(chunks total: Int, per: Int = 40) -> (jpeg: [UInt8], chunk
     // A start without an end is not a photo either.
     var open = HeyCyanAIPhotoAssembler()
     _ = open.accept(HeyCyanAIPhotoChunk(total: 1, index: 0, bytes: [0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02]))
-    #expect(!open.hasJPEGEnd)
     #expect(open.jpeg == nil)
 }
 
-@Test func aRawTailAfterTheLastChunkFinishesTheJPEG() throws {
-    let (jpeg, chunks) = fakeJPEG(chunks: 2)
+@Test func theLastChunkWithoutAJPEGEndIsNotAPhoto() {
+    // Nothing after the last chunk can finish the photo: no end marker means no photo.
+    let (_, chunks) = fakeJPEG(chunks: 2)
     var assembler = HeyCyanAIPhotoAssembler()
-    // A tail before the last chunk is ignored.
-    assembler.appendTail([0x55])
-    #expect(assembler.byteCount == 0)
     _ = assembler.accept(chunks[0])
-    // The last chunk without its final 10 bytes: those come as raw notifications.
-    let cut = chunks[1].bytes.count - 10
-    _ = assembler.accept(HeyCyanAIPhotoChunk(total: 2, index: 1, bytes: Array(chunks[1].bytes.prefix(cut))))
+    _ = assembler.accept(HeyCyanAIPhotoChunk(total: 2, index: 1, bytes: Array(chunks[1].bytes.dropLast(2))))
     #expect(assembler.isComplete)
-    #expect(!assembler.hasJPEGEnd)
-    assembler.appendTail(chunks[1].bytes[cut...].prefix(6))
-    assembler.appendTail(chunks[1].bytes[(cut + 6)...])
-    #expect(assembler.hasJPEGEnd)
-    // Anything after the end is ignored.
-    assembler.appendTail([0x99, 0x98])
+    #expect(assembler.jpeg == nil)
+}
+
+@Test func theAssemblerStopsAtTwoMegabytes() {
+    let half = [UInt8](repeating: 0x11, count: HeyCyanAIPhotoAssembler.maximumBytes / 2)
+    var assembler = HeyCyanAIPhotoAssembler()
+    #expect(assembler.accept(HeyCyanAIPhotoChunk(total: 3, index: 0, bytes: [0xFF, 0xD8, 0xFF] + half.dropFirst(3))) == .accepted)
+    #expect(assembler.accept(HeyCyanAIPhotoChunk(total: 3, index: 1, bytes: half)) == .accepted)
+    #expect(assembler.byteCount == HeyCyanAIPhotoAssembler.maximumBytes)
+    // One more byte would pass the cap: refused, and the photo never completes.
+    #expect(assembler.accept(HeyCyanAIPhotoChunk(total: 3, index: 2, bytes: [0xFF, 0xD9])) == .unexpected)
+    #expect(assembler.byteCount == HeyCyanAIPhotoAssembler.maximumBytes)
+    #expect(assembler.nextIndex == 2)
+    #expect(!assembler.isComplete)
+    #expect(assembler.jpeg == nil)
+}
+
+@Test func completionFollowsTheChunksSixteenBitTotal() throws {
+    // 300 chunks: the shot event would announce 300 % 256 = 44; the chunks' total decides.
+    let (jpeg, chunks) = fakeJPEG(chunks: 300, per: 8)
+    #expect(HeyCyanEvent(HeyCyanFrame(command: 0x73, payload: [0x02, 0x00, UInt8(300 & 0xFF), 0x01, 0x00]))
+        == .aiPhotoReady(chunkCount: 44))
+    var assembler = HeyCyanAIPhotoAssembler()
+    for chunk in chunks.prefix(44) { _ = assembler.accept(chunk) }
+    #expect(!assembler.isComplete)
+    #expect(assembler.total == 300)
+    for chunk in chunks.dropFirst(44) { _ = assembler.accept(chunk) }
+    #expect(assembler.isComplete)
     #expect(try #require(assembler.jpeg) == Data(jpeg))
 }

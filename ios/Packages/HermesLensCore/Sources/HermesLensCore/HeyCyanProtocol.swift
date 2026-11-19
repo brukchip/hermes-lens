@@ -304,7 +304,9 @@ public enum HeyCyanEvent: Equatable, Sendable {
     /// Reply to `HeyCyanCommand.takeAIPhoto` (`02 01 06 …`; `FF FF` on the L802): accepted.
     case aiPhotoReply
     /// The AI photo is ready to pull (event 0x73, type 0x02: `02 00 <chunk count> 01 00`).
-    /// The count is one byte here; the chunk replies carry the authoritative total.
+    /// The count is one byte here, so a photo of 256 chunks or more would be announced modulo
+    /// 256. It only sets the first time budget; the chunk replies' 16-bit total replaces it and
+    /// alone decides when the photo is complete.
     case aiPhotoReady(chunkCount: Int)
     /// One chunk of the AI photo (0xFD); its bytes are read with `HeyCyanAIPhotoChunk`.
     case aiPhotoChunk(index: Int, total: Int, byteCount: Int)
@@ -335,6 +337,7 @@ public enum HeyCyanEvent: Equatable, Sendable {
             guard let type = p.first else { self = .otherEvent(type: 0); return }
             switch type {
             case 0x05 where p.count >= 2: self = .battery(percent: min(100, Int(p[1])))
+            // One byte (size 6 needs 62 chunks); the chunk replies carry the 16-bit total.
             case 0x02 where p.count >= 3: self = .aiPhotoReady(chunkCount: Int(p[2]))
             case 0x03: self = .micStarted
             case 0x0A: self = .micStopped

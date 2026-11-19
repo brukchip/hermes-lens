@@ -21,9 +21,10 @@ public enum HeyCyanAIPhoto {
     /// The most a whole AI photo may take, from the trigger.
     public static let maximumSeconds: Double = 20
 
-    /// How long the pull may take once the chunk count is known (from the shot event, or the
-    /// first chunk when that event did not come): 3 s plus 0.25 s per chunk, at most
-    /// `maximumSeconds`. 13 chunks: 6.25 s; 62 chunks: 18.5 s.
+    /// How long the pull may take once the chunk count is known, counted from that moment:
+    /// 3 s plus 0.25 s per chunk, at most `maximumSeconds`. 13 chunks: 6.25 s; 62 chunks:
+    /// 18.5 s. The shot event's count is one byte, so the 16-bit total of the chunk replies
+    /// replaces it as soon as the first chunk is in.
     public static func pullSeconds(chunkCount: Int) -> Double {
         min(maximumSeconds, 3 + 0.25 * Double(max(0, chunkCount)))
     }
@@ -62,8 +63,9 @@ public struct HeyCyanAIPhotoChunk: Equatable, Sendable {
 
 /// Puts the AI photo together: chunks are accepted in order only (a repeat, a skipped index or
 /// a different total is ignored), the next index to request follows, and the JPEG is cut out
-/// once the last chunk is in. Some firmware may send the end of the photo as raw notifications
-/// without a frame header after the last chunk (`appendTail`).
+/// once the last chunk is in. Completion follows the chunk replies' 16-bit total, never the
+/// shot event's one-byte count. A photo whose last chunk brings no JPEG end (`FF D9`) is not
+/// a photo.
 public struct HeyCyanAIPhotoAssembler: Equatable, Sendable {
     public enum Acceptance: Equatable, Sendable {
         case accepted
@@ -101,17 +103,6 @@ public struct HeyCyanAIPhotoAssembler: Equatable, Sendable {
         received += 1
         return .accepted
     }
-
-    /// Raw bytes after the last chunk; ignored before it or once the JPEG has ended.
-    public mutating func appendTail<Bytes: Sequence>(_ tail: Bytes) where Bytes.Element == UInt8 {
-        guard isComplete, !hasJPEGEnd else { return }
-        let more = Array(tail)
-        guard bytes.count + more.count <= Self.maximumBytes else { return }
-        bytes.append(contentsOf: more)
-    }
-
-    /// A JPEG start (`FF D8 FF`) followed later by an end marker (`FF D9`).
-    public var hasJPEGEnd: Bool { Self.jpegRange(in: bytes) != nil }
 
     /// The photo: from the first `FF D8 FF` to the last `FF D9` after it (the last, so an
     /// embedded thumbnail's end marker cannot cut it short; padding after it is dropped).

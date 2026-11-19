@@ -261,25 +261,24 @@ final class HeyCyanGlassesService: NSObject {
 
     private struct AIPhotoPull {
         var assembler = HeyCyanAIPhotoAssembler()
-        /// The chunk count from the "shot done" event.
+        /// The chunk count from the "shot done" event: one byte, only a first time budget
+        /// until the first chunk brings the 16-bit total.
         var announcedChunks: Int?
-        /// After the last chunk without a JPEG end: raw notifications are the photo's tail.
-        var acceptsTail = false
     }
 
     /// The shot event normally comes about 2.5 s after the trigger.
     static let aiPhotoShotWait: Duration = .seconds(6)
     static let aiPhotoChunkTimeout: Duration = .seconds(3)
     static let aiPhotoChunkRetries = 3
-    /// How long raw notifications may still bring the end of the JPEG after the last chunk.
-    static let aiPhotoTailWait: Duration = .seconds(2)
 
     /// Takes an AI photo (`HeyCyanCommand.takeAIPhoto`) and pulls its JPEG chunk by chunk over
     /// Bluetooth, no Wi-Fi: about 4 s at size 2. Waits up to 6 s for the "shot done" event
     /// (without it, chunk 0 is still asked for once), then asks for each chunk with a 3 s
     /// timeout and up to 3 repeats of the same index. The whole pull may take 3 s plus 0.25 s
-    /// per chunk once the count is known, and never more than 20 s from the trigger. Shares the
-    /// one-photo-at-a-time guard with `takePhoto`; cancelling the calling task stops it.
+    /// per chunk from when the count is first known (the shot event's one-byte count, replaced
+    /// by the chunk replies' 16-bit total once the first chunk is in), and never more than 20 s
+    /// from the trigger. After the last chunk, bytes without a JPEG end are a failure. Shares
+    /// the one-photo-at-a-time guard with `takePhoto`; cancelling the calling task stops it.
     func captureAIPhoto() async throws(HeyCyanAIPhotoFailure) -> Data {
         let clock = ContinuousClock()
         let started = clock.now
@@ -301,14 +300,18 @@ final class HeyCyanGlassesService: NSObject {
             // The glasses may start their own listening after the photo, not only after the trigger.
             buttonFilter.photoCommandSent(at: .now)
         }
-        var deadline = started + .seconds(HeyCyanAIPhoto.maximumSeconds)
-        var budgetSet = false
+        let hardDeadline = started + .seconds(HeyCyanAIPhoto.maximumSeconds)
+        var deadline = hardDeadline
+        /// When a chunk count was first known: the pull budget counts from here.
+        var countKnownAt: ContinuousClock.Instant?
         func check() throws(HeyCyanAIPhotoFailure) {
             if Task.isCancelled { throw failed(.cancelled) }
             guard isConnected, aiPhoto != nil else { throw failed(.disconnected) }
-            if !budgetSet, let count = aiPhoto?.announcedChunks ?? aiPhoto?.assembler.total {
-                budgetSet = true
-                deadline = min(deadline, clock.now + .seconds(HeyCyanAIPhoto.pullSeconds(chunkCount: count)))
+            // The 16-bit total from the chunks wins over the shot event's one-byte count.
+            if let count = aiPhoto?.assembler.total ?? aiPhoto?.announcedChunks {
+                let anchor = countKnownAt ?? clock.now
+                countKnownAt = anchor
+                deadline = min(hardDeadline, anchor + .seconds(HeyCyanAIPhoto.pullSeconds(chunkCount: count)))
             }
             guard clock.now < deadline else { throw failed(.outOfTime) }
         }
@@ -360,24 +363,13 @@ final class HeyCyanGlassesService: NSObject {
             await waitForAIPhoto(until: chunkDeadline)
         }
 
-        if aiPhoto?.assembler.hasJPEGEnd == false {
-            aiPhoto?.acceptsTail = true
-            let tailDeadline = min(started + .seconds(HeyCyanAIPhoto.maximumSeconds), clock.now + Self.aiPhotoTailWait)
-            while aiPhoto?.assembler.hasJPEGEnd == false, clock.now < tailDeadline {
-                await waitForAIPhoto(until: tailDeadline)
-                if Task.isCancelled { throw failed(.cancelled) }
-                guard isConnected else { throw failed(.disconnected) }
-            }
-            trace("heycyan.aiphoto", "stage=chunk result=tail ended=\(aiPhoto?.assembler.hasJPEGEnd ?? false) "
-                + "bytes=\(aiPhoto?.assembler.byteCount ?? 0) ms=\(ms())")
-        }
         guard let assembler = aiPhoto?.assembler, let jpeg = assembler.jpeg else { throw failed(.notAPhoto) }
         trace("heycyan.aiphoto", "stage=done result=ok chunks=\(assembler.received)/\(assembler.total ?? 0) "
             + "bytes=\(jpeg.count) ms=\(ms())")
         return jpeg
     }
 
-    /// Returns when the AI photo pull changed (an event, a chunk, a tail, a disconnect), at
+    /// Returns when the AI photo pull changed (an event, a chunk, a disconnect), at
     /// `deadline`, or when the calling task is cancelled.
     private func waitForAIPhoto(until deadline: ContinuousClock.Instant) async {
         if aiPhotoWoken {
@@ -759,12 +751,6 @@ extension HeyCyanGlassesService: @preconcurrency CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard peripheral == self.peripheral, characteristic.uuid == notifyUUID, error == nil,
               let value = characteristic.value else { return }
-        // Some firmware may send the end of an AI photo as raw notifications after its last chunk.
-        if aiPhoto?.acceptsTail == true, parser.pendingByteCount == 0, value.first != HeyCyanFrame.magic {
-            aiPhoto?.assembler.appendTail(value)
-            wakeAIPhoto()
-            return
-        }
         for frame in parser.push(value) {
             // Other frames (events, battery) can arrive between chunks; they go their usual way.
             if let chunk = HeyCyanAIPhotoChunk(frame) {
