@@ -78,6 +78,69 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
     #expect(HeyCyanFrame(command: 0x10, payload: []).encoded == [0xBC, 0x10, 0, 0, 0xFF, 0xFF])
 }
 
+/// Every `HeyCyanCommand` case by name. `init(_:)` switches over the command without a
+/// default, so a new command case does not compile until it is added here, and then the
+/// allowlist tests below cover it (a case missing from `parameterless` fails them).
+private enum CommandCase: CaseIterable {
+    case takePhoto, mediaCount, batteryLevel, enterTransferMode, exitTransferMode, takeAIPhoto, requestAIPhotoChunk
+
+    init(_ command: HeyCyanCommand) {
+        switch command {
+        case .takePhoto: self = .takePhoto
+        case .mediaCount: self = .mediaCount
+        case .batteryLevel: self = .batteryLevel
+        case .enterTransferMode: self = .enterTransferMode
+        case .exitTransferMode: self = .exitTransferMode
+        case .takeAIPhoto: self = .takeAIPhoto
+        case .requestAIPhotoChunk: self = .requestAIPhotoChunk
+        }
+    }
+
+    /// Instances of this case: the parameter's edge values for the chunk request.
+    var samples: [HeyCyanCommand] {
+        switch self {
+        case .takePhoto: [.takePhoto]
+        case .mediaCount: [.mediaCount]
+        case .batteryLevel: [.batteryLevel]
+        case .enterTransferMode: [.enterTransferMode]
+        case .exitTransferMode: [.exitTransferMode]
+        case .takeAIPhoto: [.takeAIPhoto]
+        case .requestAIPhotoChunk: [.requestAIPhotoChunk(index: 0), .requestAIPhotoChunk(index: 1), .requestAIPhotoChunk(index: 0xFFFF)]
+        }
+    }
+
+    /// Matched by its layout, not listed in `parameterless`.
+    var hasParameter: Bool { self == .requestAIPhotoChunk }
+
+    static var everyCommand: [HeyCyanCommand] { allCases.flatMap(\.samples) }
+}
+
+/// Glasses control payloads that must never go out: factory reset, restart, OTA mode, reset
+/// the glasses' Wi-Fi Direct.
+private let forbiddenControlPayloads: [[UInt8]] = [[0x02, 0x01, 0x0A], [0x02, 0x01, 0x0E], [0x02, 0x01, 0x05], [0x02, 0x01, 0x0F]]
+
+@Test func everyCommandCaseIsAllowlistedAndNoneIsDangerous() {
+    for kind in CommandCase.allCases {
+        for command in kind.samples {
+            #expect(CommandCase(command) == kind)
+            // Every case without a parameter is on the allowlist the decoder matches against.
+            if !kind.hasParameter { #expect(HeyCyanCommand.parameterless.contains(command), "\(command)") }
+            // Its bytes are one frame that maps back to the same command through the allowlist.
+            var parser = HeyCyanFrameParser()
+            let frames = parser.push(command.bytes)
+            #expect(frames.count == 1)
+            #expect(frames.first.flatMap { HeyCyanCommand(command: $0.command, payload: $0.payload) } == command)
+            // Only glasses control, the battery request and chunk requests go out, and no
+            // glasses control payload starts like a forbidden one.
+            #expect([HeyCyanCommand.glassesControl, HeyCyanCommand.syncBattery, HeyCyanCommand.aiPhotoChunk].contains(command.command))
+            if command.command == HeyCyanCommand.glassesControl {
+                #expect(!forbiddenControlPayloads.contains { command.payload.starts(with: $0) }, "\(command)")
+            }
+        }
+    }
+    #expect(HeyCyanCommand.parameterless.count == CommandCase.allCases.filter { !$0.hasParameter }.count)
+}
+
 @Test func onlyTheAllowlistedCommandsCanBeBuilt() {
     #expect(HeyCyanCommand.parameterless == [
         .takePhoto, .mediaCount, .batteryLevel, .enterTransferMode, .exitTransferMode, .takeAIPhoto,
@@ -121,15 +184,9 @@ private func audioFrame(_ seed: UInt8) -> [UInt8] {
 }
 
 @Test func dangerousCommandsCannotBeBuilt() {
-    let forbidden: [[UInt8]] = [
-        [0x02, 0x01, 0x0A],  // factory reset
-        [0x02, 0x01, 0x0E],  // restart
-        [0x02, 0x01, 0x05],  // OTA mode
-        [0x02, 0x01, 0x0F],  // reset the glasses' Wi-Fi Direct
-    ]
-    for payload in forbidden {
+    for payload in forbiddenControlPayloads {
         #expect(HeyCyanCommand(command: 0x41, payload: payload) == nil)
-        for command in HeyCyanCommand.parameterless { #expect(command.bytes != HeyCyanFrame(command: 0x41, payload: payload).encoded) }
+        for command in CommandCase.everyCommand { #expect(command.bytes != HeyCyanFrame(command: 0x41, payload: payload).encoded) }
     }
     // Firmware-update (DFU) opcodes: no command byte other than glasses control is reachable.
     for dfu: UInt8 in [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x0C, 0x60] {
