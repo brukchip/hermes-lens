@@ -19,13 +19,15 @@ import UIKit
 ///    in Settings › Wi-Fi › Other…, and the app polls until the glasses answer (3 minutes).
 ///    (A look in a call does not use Wi-Fi: `takeAIPhoto` pulls a small photo over Bluetooth.)
 /// 4. Plain HTTP: `http://<glasses>/files/media.config` lists the files; the newest JPEG is
-///    downloaded from `/files/<name>` (at most 15 MB).
+///    downloaded from `/files/<name>` (at most 15 MB). The glasses are unauthenticated, so
+///    only a private address inside the subnet the phone is on is asked (the reported one,
+///    then 192.168.31.1; `HeyCyanGlassesAddress.candidates`) and redirects are refused.
 /// 5. Always, success or failure: leave transfer mode (`0x41 02 01 09`) and remove the Wi-Fi
 ///    configuration, so the phone returns to its usual network.
 ///
 /// One photo at a time: a second request while one runs is refused (`busy`).
 /// Privacy: traces carry stage names, durations, the glasses' private IP and counts. Never the
-/// Wi-Fi name or password, file names, file contents or photo bytes. The manual card shows the
+/// phone's own address, the Wi-Fi name or password, file names, file contents or photo bytes. The manual card shows the
 /// name and password on screen: it is the glasses' own temporary network.
 @MainActor
 @Observable
@@ -311,15 +313,14 @@ final class HeyCyanPhotoTransfer {
             let pollStart = seconds(clock.now)
             traceWiFiIP(final: false)
             let reported = glasses.reportedWiFiAddress
-            let gateway = HeyCyanLocalNetwork.wifiGateway()
-            let hosts = HeyCyanGlassesAddress.candidates(reported: reported, gateway: gateway)
+            let hosts = HeyCyanGlassesAddress.candidates(reported: reported, phone: HeyCyanLocalNetwork.wifiSubnet())
             let result = await Self.probe(hosts, timeout: HeyCyanManualJoin.probeTimeout)
             switch result {
             case .photo(let host, let name, let fileCount):
                 state.recordPoll(answered: true, at: seconds(clock.now))
                 manualJoin?.state = state
                 manualJoin?.password = nil
-                let source = host == reported ? "reported" : host == gateway ? "gateway" : "common"
+                let source = host == reported ? "reported" : "known"
                 trace("stage=manual_join ms=\(ms(since: stageStart)) result=ok ip=\(host) source=\(source) "
                     + "polls=\(state.polls) file_count=\(fileCount)")
                 return Found(host: host, source: source, rounds: state.polls, fileCount: fileCount, photo: name)
@@ -466,16 +467,15 @@ final class HeyCyanPhotoTransfer {
             rounds += 1
             traceWiFiIP(final: false)
             let reported = glasses.reportedWiFiAddress
-            let gateway = HeyCyanLocalNetwork.wifiGateway()
-            let hosts = HeyCyanGlassesAddress.candidates(reported: reported, gateway: gateway)
+            let hosts = HeyCyanGlassesAddress.candidates(reported: reported, phone: HeyCyanLocalNetwork.wifiSubnet())
             let probeSeconds = min(rounds == 1 ? 2.0 : 1.5, max(0.5, (remaining(deadline) - .seconds(2)).seconds))
             if rounds == 1 {
-                trace("stage=find_round ms=0 round=1 hosts=\(hosts.count) reported=\(reported ?? "none") gateway=\(gateway ?? "none")")
+                trace("stage=find_round ms=0 round=1 hosts=\(hosts.count) reported=\(reported ?? "none")")
             }
             let result = await Self.probe(hosts, timeout: probeSeconds)
             switch result {
             case .photo(let host, let name, let fileCount):
-                let source = host == reported ? "reported" : host == gateway ? "gateway" : "common"
+                let source = host == reported ? "reported" : "known"
                 return Found(host: host, source: source, rounds: rounds, fileCount: fileCount, photo: name)
             case .noPhoto(let host, let fileCount):
                 answeredWithoutPhoto = (host, fileCount)
@@ -634,10 +634,11 @@ private extension Duration {
     }
 }
 
-/// The address of the Wi-Fi network the phone is on (interface `en0`), without the
-/// "Access Wi-Fi Information" entitlement: the subnet's first host, the usual gateway.
+/// The subnet of the Wi-Fi network the phone is on (interface `en0`: its address and netmask),
+/// without the "Access Wi-Fi Information" entitlement. Nil off Wi-Fi or on a public address.
+/// Never traced: only whether the glasses' address is inside it.
 enum HeyCyanLocalNetwork {
-    static func wifiGateway() -> String? {
+    static func wifiSubnet() -> HeyCyanPhoneSubnet? {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return nil }
         defer { freeifaddrs(list) }
@@ -647,7 +648,7 @@ enum HeyCyanLocalNetwork {
                   let address = entry.ifa_addr, address.pointee.sa_family == sa_family_t(AF_INET),
                   let netmask = entry.ifa_netmask,
                   let addressText = ipv4(address), let netmaskText = ipv4(netmask) else { continue }
-            return HeyCyanGlassesAddress.firstHost(address: addressText, netmask: netmaskText)
+            return HeyCyanPhoneSubnet(address: addressText, netmask: netmaskText)
         }
         return nil
     }
@@ -668,7 +669,9 @@ enum HeyCyanHTTPError: Error {
 }
 
 /// A plain-HTTP GET on the glasses' network with a time limit and a size cap. Wi-Fi only (no
-/// cellular), no cache, no cookies. Cancelling the calling task cancels the request.
+/// cellular), no cache, no cookies, and redirects are never followed (a redirect ends as its
+/// 3xx status): only the glasses' own address is ever asked. Cancelling the calling task
+/// cancels the request.
 enum HeyCyanHTTP {
     static func get(_ url: URL, timeout: Double, maxBytes: Int) async throws -> Data {
         let loader = CappedLoader(maxBytes: maxBytes)
@@ -764,6 +767,12 @@ private final class CappedLoader: NSObject, URLSessionDataDelegate, @unchecked S
             return
         }
         completionHandler(.allow)
+    }
+
+    /// Never follows a redirect: the 3xx response itself comes back and fails as `badStatus`.
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {

@@ -393,36 +393,69 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     let address = HeyCyanFrame(command: 0x73, payload: [0x08, 0xC0, 0xA8, 0x1F, 0x01]).encoded
     let zero = HeyCyanFrame(command: 0x73, payload: [0x08, 0, 0, 0, 0]).encoded
     let short = HeyCyanFrame(command: 0x73, payload: [0x08, 0xC0, 0xA8]).encoded
+    // A public address (an impersonator pointing the app elsewhere) is not accepted.
+    let publicAddress = HeyCyanFrame(command: 0x73, payload: [0x08, 0x08, 0x08, 0x08, 0x08]).encoded
     // Seen on the L802 about 20 s into transfer mode: `09 ff 02`.
     let wifiError = HeyCyanFrame(command: 0x73, payload: [0x09, 0xFF, 0x02]).encoded
-    #expect(parser.push(heartbeat + exit + address + zero + short + wifiError).map(HeyCyanEvent.init) == [
+    #expect(parser.push(heartbeat + exit + address + zero + short + publicAddress + wifiError).map(HeyCyanEvent.init) == [
         .unknown(command: 0x45, byteCount: 2), .exitTransferReply, .wifiAddress("192.168.31.1"),
-        .otherEvent(type: 0x08), .otherEvent(type: 0x08), .wifiError(code: 255),
+        .otherEvent(type: 0x08), .otherEvent(type: 0x08), .otherEvent(type: 0x08), .wifiError(code: 255),
     ])
 }
 
-@Test func addressesAreCheckedAndTheGatewayIsTheSubnetsFirstHost() {
+@Test func addressesAreCheckedAndOnlyPrivateOnesCount() {
     #expect(HeyCyanGlassesAddress.isUsableIPv4("192.168.49.14"))
     for bad in ["0.0.0.0", "255.255.255.255", "192.168.49", "192.168.49.256", "a.b.c.d", "192.168.49.1 ", "1..2.3", "+1.2.3.4"] {
         #expect(!HeyCyanGlassesAddress.isUsableIPv4(bad), "\(bad)")
+        #expect(!HeyCyanGlassesAddress.isPrivateIPv4(bad), "\(bad)")
     }
-    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.23", netmask: "255.255.255.0") == "192.168.49.1")
-    #expect(HeyCyanGlassesAddress.firstHost(address: "10.20.30.40", netmask: "255.255.0.0") == "10.20.0.1")
-    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.1", netmask: "255.255.255.0") == nil)
-    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.23", netmask: "255.0.255.0") == nil)
-    #expect(HeyCyanGlassesAddress.firstHost(address: "192.168.49.23", netmask: "255.255.255.255") == nil)
-    #expect(HeyCyanGlassesAddress.firstHost(address: "nonsense", netmask: "255.255.255.0") == nil)
+    for good in ["10.0.0.1", "10.255.255.254", "172.16.0.1", "172.31.255.1", "192.168.0.1", "192.168.31.1"] {
+        #expect(HeyCyanGlassesAddress.isPrivateIPv4(good), "\(good)")
+    }
+    for publicAddress in ["8.8.8.8", "1.1.1.1", "172.15.0.1", "172.32.0.1", "192.169.0.1", "100.64.0.1", "169.254.1.1", "127.0.0.1", "11.0.0.1"] {
+        #expect(!HeyCyanGlassesAddress.isPrivateIPv4(publicAddress), "\(publicAddress)")
+    }
 }
 
-@Test func candidatesPutTheReportedAddressFirstThenTheGatewayThenCommonOnes() {
-    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.49.14", gateway: "192.168.49.1")
-        == ["192.168.49.14", "192.168.31.1", "192.168.49.1", "192.168.43.1", "192.168.4.1", "10.0.0.1", "192.168.1.1"])
-    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.31.1", gateway: "192.168.31.1").prefix(2)
-        == ["192.168.31.1", "192.168.49.1"])
-    #expect(HeyCyanGlassesAddress.candidates(reported: nil, gateway: "172.20.10.1").prefix(3)
-        == ["192.168.31.1", "172.20.10.1", "192.168.49.1"])
-    #expect(HeyCyanGlassesAddress.candidates(reported: "0.0.0.0", gateway: nil)
-        == ["192.168.31.1"] + HeyCyanGlassesAddress.commonCandidates)
+@Test func thePhonesSubnetHoldsOnlyOtherPrivateHostsOfItsOwnNetwork() throws {
+    let subnet = try #require(HeyCyanPhoneSubnet(address: "192.168.31.23", netmask: "255.255.255.0"))
+    #expect(subnet.contains("192.168.31.1"))
+    #expect(subnet.contains("192.168.31.254"))
+    #expect(!subnet.contains("192.168.31.23"))   // the phone itself
+    #expect(!subnet.contains("192.168.31.0"))    // network address
+    #expect(!subnet.contains("192.168.31.255"))  // broadcast
+    #expect(!subnet.contains("192.168.1.1"))     // another network
+    #expect(!subnet.contains("8.8.8.8"))
+    #expect(!subnet.contains("nonsense"))
+    let wide = try #require(HeyCyanPhoneSubnet(address: "10.20.30.40", netmask: "255.255.0.0"))
+    #expect(wide.contains("10.20.0.1"))
+    #expect(!wide.contains("10.21.0.1"))
+    // A public phone address, a broken or too-small netmask: no subnet at all.
+    #expect(HeyCyanPhoneSubnet(address: "8.8.8.23", netmask: "255.255.255.0") == nil)
+    #expect(HeyCyanPhoneSubnet(address: "192.168.49.23", netmask: "255.0.255.0") == nil)
+    #expect(HeyCyanPhoneSubnet(address: "192.168.49.23", netmask: "255.255.255.255") == nil)
+    #expect(HeyCyanPhoneSubnet(address: "192.168.49.23", netmask: "255.255.255.254") == nil)
+    #expect(HeyCyanPhoneSubnet(address: "192.168.49.23", netmask: "0.0.0.0") == nil)
+    #expect(HeyCyanPhoneSubnet(address: "nonsense", netmask: "255.255.255.0") == nil)
+}
+
+@Test func candidatesAreOnlyTheGlassesAddressesInsideThePhonesSubnet() throws {
+    let glassesNetwork = HeyCyanPhoneSubnet(address: "192.168.31.23", netmask: "255.255.255.0")
+    let homeNetwork = HeyCyanPhoneSubnet(address: "192.168.1.40", netmask: "255.255.255.0")
+    // On the glasses' network: the reported address first, then the known one.
+    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.31.7", phone: glassesNetwork)
+        == ["192.168.31.7", "192.168.31.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.31.1", phone: glassesNetwork) == ["192.168.31.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: nil, phone: glassesNetwork) == ["192.168.31.1"])
+    // Still on another network, or on none: nothing is asked, not even the known address.
+    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.31.1", phone: homeNetwork).isEmpty)
+    #expect(HeyCyanGlassesAddress.candidates(reported: nil, phone: nil).isEmpty)
+    // A reported address outside the phone's subnet, or a public one, is never used.
+    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.1.1", phone: glassesNetwork) == ["192.168.31.1"])
+    #expect(HeyCyanGlassesAddress.candidates(reported: "8.8.8.8", phone: glassesNetwork) == ["192.168.31.1"])
+    // The glasses on another private subnet: their reported address when the phone is there.
+    let other = HeyCyanPhoneSubnet(address: "192.168.49.20", netmask: "255.255.255.0")
+    #expect(HeyCyanGlassesAddress.candidates(reported: "192.168.49.1", phone: other) == ["192.168.49.1"])
 }
 
 @Test func fileURLsArePlainHTTPUnderFiles() {
@@ -433,6 +466,7 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
         == "http://192.168.49.14/files/photo%201.jpg")
     #expect(HeyCyanGlassesAddress.fileURL(host: "192.168.49.14", name: "../etc/passwd") == nil)
     #expect(HeyCyanGlassesAddress.fileURL(host: "example.com", name: "a.jpg") == nil)
+    #expect(HeyCyanGlassesAddress.fileURL(host: "8.8.8.8", name: "a.jpg") == nil)
 }
 
 @Test func theMediaListIsOneNamePerLine() {

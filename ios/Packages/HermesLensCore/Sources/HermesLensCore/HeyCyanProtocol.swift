@@ -315,6 +315,7 @@ public enum HeyCyanEvent: Equatable, Sendable {
     /// Reply to `HeyCyanCommand.exitTransferMode`.
     case exitTransferReply
     /// The glasses' Wi-Fi address during transfer mode (event 0x73, type 0x08: four IPv4 bytes).
+    /// A public or unusable address is not accepted (`otherEvent`).
     case wifiAddress(String)
     /// A Wi-Fi problem the glasses report (event 0x73, type 0x09). Code 255 is common and not
     /// necessarily fatal, so the app only traces it.
@@ -340,8 +341,9 @@ public enum HeyCyanEvent: Equatable, Sendable {
             case 0x12: self = .volume
             case 0x01 where p.count >= 2: self = .state(sequence: Int(p[1]))
             case 0x08 where p.count >= 5:
+                // Only a private address: anything nearby can send this event (no pairing).
                 let address = p[1...4].map(String.init).joined(separator: ".")
-                self = HeyCyanGlassesAddress.isUsableIPv4(address) ? .wifiAddress(address) : .otherEvent(type: type)
+                self = HeyCyanGlassesAddress.isPrivateIPv4(address) ? .wifiAddress(address) : .otherEvent(type: type)
             case 0x09: self = .wifiError(code: p.count >= 2 ? Int(p[1]) : -1)
             default: self = .otherEvent(type: type)
             }

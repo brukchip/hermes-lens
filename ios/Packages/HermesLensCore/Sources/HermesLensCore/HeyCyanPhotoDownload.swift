@@ -6,14 +6,15 @@ import Foundation
 // `GET /files/<name>` returns a file. Pure Swift so it can be tested without a network.
 
 /// Where the glasses' HTTP server may be.
+///
+/// The glasses have no Bluetooth pairing, so anything nearby can pretend to be them and report
+/// any address. The app therefore fetches only from a private (RFC 1918) address inside the
+/// subnet the phone's Wi-Fi is on right now (`HeyCyanPhoneSubnet`): the glasses' own network
+/// once the user joined it. Never a public address, never another network.
 public enum HeyCyanGlassesAddress {
     /// The address the L802 reported for its own hotspot (event 0x73/08, `c0 a8 1f 01`). Tried
     /// right after a reported address.
     public static let knownGlassesAddress = "192.168.31.1"
-
-    /// Tried when the glasses never report their address: common addresses of a device that
-    /// runs its own network (Wi-Fi Direct groups, Android-style hotspots, small access points).
-    public static let commonCandidates = ["192.168.49.1", "192.168.43.1", "192.168.4.1", "10.0.0.1", "192.168.1.1"]
 
     /// Four decimal octets, not the "any" or broadcast address.
     public static func isUsableIPv4(_ text: String) -> Bool {
@@ -21,27 +22,20 @@ public enum HeyCyanGlassesAddress {
         return octets != [0, 0, 0, 0] && octets != [255, 255, 255, 255]
     }
 
-    /// The usual gateway of the network the phone joined: the first host address of its subnet
-    /// (`address & netmask` + 1). Nil for malformed input or a subnet too small to have one.
-    public static func firstHost(address: String, netmask: String) -> String? {
-        guard let a = octets(address), let m = octets(netmask) else { return nil }
-        let addressValue = a.reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
-        let maskValue = m.reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
-        // A real netmask is contiguous ones then zeros; /31 and /32 have no separate gateway.
-        guard maskValue != 0, (~maskValue) & (~maskValue &+ 1) == 0, ~maskValue >= 3 else { return nil }
-        let host = (addressValue & maskValue) + 1
-        guard host != addressValue else { return nil }
-        let result = (0..<4).reversed().map { String((host >> (UInt32($0) * 8)) & 0xFF) }.joined(separator: ".")
-        return isUsableIPv4(result) ? result : nil
+    /// A private-range IPv4 address (RFC 1918: 10/8, 172.16/12, 192.168/16).
+    public static func isPrivateIPv4(_ text: String) -> Bool {
+        guard isUsableIPv4(text), let o = octets(text) else { return false }
+        return o[0] == 10 || (o[0] == 172 && (16...31).contains(o[1])) || (o[0] == 192 && o[1] == 168)
     }
 
-    /// The addresses to try, in order: what the glasses reported, `knownGlassesAddress`, the
-    /// joined network's gateway, then `commonCandidates`. Unusable and repeated addresses are
-    /// left out.
-    public static func candidates(reported: String?, gateway: String?) -> [String] {
+    /// The addresses to try, in order: what the glasses reported, then `knownGlassesAddress`.
+    /// Only addresses inside `phone`, the subnet the phone's Wi-Fi is on, are kept, so nothing
+    /// is asked while the phone is still on another network (or on none).
+    public static func candidates(reported: String?, phone: HeyCyanPhoneSubnet?) -> [String] {
+        guard let phone else { return [] }
         var result: [String] = []
-        for address in [reported, knownGlassesAddress, gateway].compactMap({ $0 }) + commonCandidates
-        where isUsableIPv4(address) && !result.contains(address) {
+        for address in [reported, knownGlassesAddress].compactMap({ $0 })
+        where phone.contains(address) && !result.contains(address) {
             result.append(address)
         }
         return result
@@ -50,9 +44,9 @@ public enum HeyCyanGlassesAddress {
     /// `http://<host>/files/media.config`.
     public static func mediaListURL(host: String) -> URL? { fileURL(host: host, name: "media.config") }
 
-    /// `http://<host>/files/<name>`, for a usable IPv4 host and a safe file name only.
+    /// `http://<host>/files/<name>`, for a private IPv4 host and a safe file name only.
     public static func fileURL(host: String, name: String) -> URL? {
-        guard isUsableIPv4(host), HeyCyanMediaList.isSafeName(name) else { return nil }
+        guard isPrivateIPv4(host), HeyCyanMediaList.isSafeName(name) else { return nil }
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
@@ -60,7 +54,7 @@ public enum HeyCyanGlassesAddress {
         return components.url
     }
 
-    private static func octets(_ text: String) -> [UInt8]? {
+    static func octets(_ text: String) -> [UInt8]? {
         let parts = text.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 4 else { return nil }
         var result: [UInt8] = []
@@ -70,6 +64,34 @@ public enum HeyCyanGlassesAddress {
             result.append(value)
         }
         return result
+    }
+}
+
+/// The subnet the phone's Wi-Fi is on (its address and netmask). Nil when the phone's address
+/// is not private or the netmask is not a real one with room for other hosts.
+public struct HeyCyanPhoneSubnet: Equatable, Sendable {
+    let address: UInt32
+    let mask: UInt32
+
+    public init?(address: String, netmask: String) {
+        guard HeyCyanGlassesAddress.isPrivateIPv4(address), let a = Self.value(address), let m = Self.value(netmask)
+        else { return nil }
+        // A real netmask is contiguous ones then zeros; /31 and /32 leave no room for the glasses.
+        guard m != 0, (~m) & (~m &+ 1) == 0, ~m >= 3 else { return nil }
+        self.address = a
+        self.mask = m
+    }
+
+    /// A private address of another host in this subnet: not the phone itself, not the
+    /// subnet's network or broadcast address.
+    public func contains(_ host: String) -> Bool {
+        guard HeyCyanGlassesAddress.isPrivateIPv4(host), let h = Self.value(host) else { return false }
+        let network = address & mask
+        return h & mask == network && h != network && h != network | ~mask && h != address
+    }
+
+    static func value(_ text: String) -> UInt32? {
+        HeyCyanGlassesAddress.octets(text).map { $0.reduce(UInt32(0)) { $0 << 8 | UInt32($1) } }
     }
 }
 
