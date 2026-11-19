@@ -175,7 +175,7 @@ struct HeyCyanSettingsRows: View {
         testPhotoDetail = nil
         let outcome = await model.takeHeyCyanPhoto(fetch: fetch)
         switch outcome {
-        case .fetched(let jpeg, _, _):
+        case .fetched(let jpeg, _):
             if let image = UIImage(data: jpeg) {
                 testPhoto = image
                 let width = Int(image.size.width * image.scale), height = Int(image.size.height * image.scale)

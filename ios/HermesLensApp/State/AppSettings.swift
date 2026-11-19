@@ -21,7 +21,6 @@ final class AppSettings {
         static let heyCyanPeripheral = "settings.heyCyan.peripheral"
         static let heyCyanName = "settings.heyCyan.name"
         static let heyCyanButtonStartsCall = "settings.heyCyan.buttonStartsCall"
-        static let heyCyanKnownNetworks = "settings.heyCyan.knownNetworks"
     }
 
     private let defaults: UserDefaults
@@ -60,11 +59,6 @@ final class AppSettings {
     var heyCyanButtonStartsCall: Bool {
         didSet { defaults.set(heyCyanButtonStartsCall, forKey: Key.heyCyanButtonStartsCall) }
     }
-    /// The glasses' Wi-Fi networks this iPhone joined successfully, by paired glasses: network
-    /// names only, never a password. Never logged.
-    var heyCyanKnownNetworks: HeyCyanKnownNetworks {
-        didSet { defaults.set(heyCyanKnownNetworks.encoded(), forKey: Key.heyCyanKnownNetworks) }
-    }
     let deviceID: UUID
     var accessToken: String
     /// The token as it is in Keychain, to tell a typed but unsaved token apart.
@@ -98,7 +92,8 @@ final class AppSettings {
         heyCyanPeripheralID = defaults.string(forKey: Key.heyCyanPeripheral).flatMap(UUID.init(uuidString:))
         heyCyanPeripheralName = defaults.string(forKey: Key.heyCyanName)
         heyCyanButtonStartsCall = defaults.bool(forKey: Key.heyCyanButtonStartsCall)
-        heyCyanKnownNetworks = HeyCyanKnownNetworks.decoded(from: defaults.data(forKey: Key.heyCyanKnownNetworks))
+        // A test build kept the glasses' Wi-Fi names here; nothing reads them any more.
+        defaults.removeObject(forKey: "settings.heyCyan.knownNetworks")
         bridgeURL = defaults.string(forKey: Key.bridgeURL) ?? HermesAppEnvironment.defaultBridgeURL
         sessionKey = defaults.string(forKey: Key.sessionKey) ?? "hermes-lens"
 

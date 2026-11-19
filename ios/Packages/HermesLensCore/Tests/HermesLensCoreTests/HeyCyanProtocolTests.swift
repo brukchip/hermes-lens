@@ -575,28 +575,3 @@ private func transferReply(ssid: String, password: String, status: UInt8 = 0x01)
     #expect(join.phase == .gaveUp)
     #expect(!join.shouldPoll(at: 1))
 }
-
-// MARK: Known glasses networks
-
-@Test func knownNetworksKeepOnlyTheNameByGlasses() throws {
-    var store = HeyCyanKnownNetworks()
-    #expect(!store.knows("GLASSES-A"))
-    store.remember(ssid: "Glasses 0A1B2C3D4E5F", for: "GLASSES-A")
-    store.remember(ssid: "", for: "GLASSES-B")
-    store.remember(ssid: "Glasses_1234", for: nil)
-    #expect(store.ssid(for: "GLASSES-A") == "Glasses 0A1B2C3D4E5F")
-    #expect(!store.knows("GLASSES-B"))
-    #expect(!store.knows(nil))
-    store.remember(ssid: "Glasses_5678", for: "GLASSES-A")
-    #expect(store.ssid(for: "GLASSES-A") == "Glasses_5678")
-
-    let data = try #require(store.encoded())
-    #expect(HeyCyanKnownNetworks.decoded(from: data) == store)
-    #expect(!String(decoding: data, as: UTF8.self).lowercased().contains("password"))
-    #expect(HeyCyanKnownNetworks.decoded(from: nil) == HeyCyanKnownNetworks())
-    #expect(HeyCyanKnownNetworks.decoded(from: Data("nonsense".utf8)) == HeyCyanKnownNetworks())
-
-    store.forget("GLASSES-A")
-    #expect(!store.knows("GLASSES-A"))
-    store.forget(nil)
-}

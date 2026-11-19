@@ -126,8 +126,8 @@ final class HeyCyanPhotoTransfer {
         case .manualJoin: manual = true
         }
         do {
-            let (jpeg, network) = try await fetchNewestPhoto(deadline: deadline, manual: manual)
-            return .fetched(jpeg: jpeg, photosOnGlasses: count, network: network)
+            let jpeg = try await fetchNewestPhoto(deadline: deadline, manual: manual)
+            return .fetched(jpeg: jpeg, photosOnGlasses: count)
         } catch {
             return .keptOnGlasses(photosOnGlasses: count, reason: error.reason)
         }
@@ -159,8 +159,8 @@ final class HeyCyanPhotoTransfer {
         manualJoin = nil
     }
 
-    /// The photo and the name of the network it came over.
-    private func fetchNewestPhoto(deadline: ContinuousClock.Instant, manual: Bool) async throws(HeyCyanTransferFailure) -> (Data, String) {
+    /// The newest photo on the glasses, over their Wi-Fi.
+    private func fetchNewestPhoto(deadline: ContinuousClock.Instant, manual: Bool) async throws(HeyCyanTransferFailure) -> Data {
         let started = clock.now
         var joinedSSID: String?
         var enteredTransferMode = false
@@ -182,7 +182,7 @@ final class HeyCyanPhotoTransfer {
     }
 
     private func transfer(deadline: ContinuousClock.Instant, manual: Bool, enteredTransferMode: inout Bool,
-                          joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> (Data, String) {
+                          joinedSSID: inout String?) async throws(HeyCyanTransferFailure) -> Data {
         // 1. Transfer mode: the glasses' Wi-Fi name and password over Bluetooth.
         stage = .openingGlassesWiFi
         let stageStart = clock.now
@@ -228,7 +228,7 @@ final class HeyCyanPhotoTransfer {
                 throw HeyCyanTransferFailure.notAPhoto
             }
             trace("stage=download ms=\(ms(since: downloadStart)) result=ok bytes=\(jpeg.count)")
-            return (jpeg, credentials.ssid)
+            return jpeg
         } catch let failure as HeyCyanTransferFailure {
             throw failure
         } catch {

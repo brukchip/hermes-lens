@@ -845,7 +845,6 @@ final class AppModel {
 
     /// Disconnects and forgets the remembered glasses.
     func forgetHeyCyan() {
-        settings.heyCyanKnownNetworks.forget(settings.heyCyanPeripheralID?.uuidString)
         heyCyan.disconnect()
         settings.heyCyanPeripheralID = nil
         settings.heyCyanPeripheralName = nil
@@ -863,9 +862,7 @@ final class AppModel {
             try? await heyCyan.connect(to: id)
         }
         guard heyCyan.isConnected else { return .notConnected }
-        let outcome = await heyCyanTransfer.takePhoto(fetch: fetch, startedAt: started)
-        if case .fetched(_, _, let network) = outcome { rememberHeyCyanNetwork(network) }
-        return outcome
+        return await heyCyanTransfer.takePhoto(fetch: fetch, startedAt: started)
     }
 
     /// A call's look on HeyCyan glasses: the AI photo over Bluetooth, reconnecting first if the
@@ -877,14 +874,6 @@ final class AppModel {
         }
         guard heyCyan.isConnected else { throw .notConnected }
         return try await heyCyanTransfer.takeAIPhoto()
-    }
-
-    /// Records the network a fetch came over (`HeyCyanKnownNetworks`, the name only).
-    private func rememberHeyCyanNetwork(_ ssid: String) {
-        let glassesID = settings.heyCyanPeripheralID?.uuidString
-        guard settings.heyCyanKnownNetworks.ssid(for: glassesID) != ssid else { return }
-        settings.heyCyanKnownNetworks.remember(ssid: ssid, for: glassesID)
-        VoiceDiagnosticLog.record("heycyan.network", "result=remembered")
     }
 
     /// The Photo and Video flows with HeyCyan glasses: the photo is taken on the glasses, brought
@@ -900,7 +889,7 @@ final class AppModel {
         defer { isWorking = false }
         let outcome = await takeHeyCyanPhoto(fetch: true)
         switch outcome {
-        case .fetched(let jpeg, _, _):
+        case .fetched(let jpeg, _):
             VoiceDiagnosticLog.record("glasses.photo", "source=heycyan \(Self.imageShape(jpeg))")
             do {
                 let id = try await beginArtifact(data: jpeg, kind: .photo, request: request)
