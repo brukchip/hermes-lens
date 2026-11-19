@@ -1,8 +1,9 @@
 import Foundation
 
-// The Wi-Fi half of bringing a HeyCyan photo to the phone, as documented by the community
-// (not yet tried on hardware by this app): in transfer mode the glasses run a plain HTTP server
-// on their own Wi-Fi network. `GET /files/media.config` lists the file names, one per line;
+// The Wi-Fi half of bringing a HeyCyan photo to the phone, first documented by the community
+// and proven by this app on an L802 with an iPhone (2026-11-16: 25 files listed, a 3280 × 2464
+// JPEG of 362 KB in 0.2 s): in transfer mode the glasses run a plain HTTP server on their own
+// Wi-Fi network. `GET /files/media.config` lists the file names, one per line;
 // `GET /files/<name>` returns a file. Pure Swift so it can be tested without a network.
 
 /// Where the glasses' HTTP server may be.

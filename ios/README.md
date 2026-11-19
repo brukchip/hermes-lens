@@ -120,12 +120,21 @@ v1/lens/native/approvals`.
 
 ## HeyCyan glasses (beta)
 
-Cheap HeyCyan camera glasses (the AM01 family, such as the L802 and M01) can be chosen
-instead of Ray-Ban Meta in **You › Glasses**. Ray-Ban Meta stays the default and works as
-before. The app talks to HeyCyan glasses directly over Bluetooth LE, without the vendor's
-app, SDK or cloud.
+Cheap HeyCyan camera glasses (the AM01 family) can be chosen instead of Ray-Ban Meta in
+**You › Glasses**. Ray-Ban Meta stays the default and works as before. The app talks to
+HeyCyan glasses directly over Bluetooth LE, without the vendor's app, SDK or cloud.
 
-What works:
+Tested on hardware so far:
+
+| | L802 | M01 |
+| --- | --- | --- |
+| Connect and battery | Confirmed | Confirmed |
+| Settings test photo (take, and fetch over Wi-Fi) | Confirmed | Confirmed |
+| Look in a call (small photo over Bluetooth) | Confirmed: 640 × 480, 7–11 s per look in a real call | Not measured yet |
+
+Other glasses of the family may work but have not been tried.
+
+What the app does with them:
 
 - **Scan** lists every named Bluetooth device nearby (`M01…` and `L 802…` names first),
   because the glasses do not advertise their services. Pick yours to connect; the app
@@ -138,17 +147,18 @@ What works:
 - **The Photo button** takes the photo on the glasses and brings it over the glasses' own
   Wi-Fi: the glasses open a Wi-Fi network for a moment, the iPhone joins it, downloads the
   newest photo over plain HTTP and returns to its usual network. The photo is saved on this
-  iPhone first, like a Meta photo. This transfer is a beta built from community notes.
+  iPhone first, like a Meta photo. This transfer is beta.
   - **Default build:** a card shows the glasses' network name and password. Their hotspot
     is hidden, so join it in Settings › Wi-Fi › Other… (exact name, WPA2/WPA3 Personal, the
     password; if it is refused, `123456789`) and come back. Luna continues as soon as the
     glasses answer (she waits up to 3 minutes), then says you can go back to your usual Wi-Fi.
   - **With automatic joining** (see below): the iPhone asks once, "Join network…?".
-- **Look** in a call: the glasses take a small "AI photo" and the iPhone pulls it over
-  Bluetooth in a few seconds, with no Wi-Fi and no setup (in tests 384 × 288 took about
-  4 s and 1088 × 816 about 12 s; the size is one constant, `HeyCyanAIPhoto.size`). If it
-  doesn't come over, Luna says so and never guesses. For a full-size photo, use the Photo
-  button or **Take and fetch**, which come over the glasses' Wi-Fi.
+- **Look** in a call: the glasses take a small "AI photo" (640 × 480) and the iPhone pulls
+  it over Bluetooth, with no Wi-Fi and no setup. On the L802 that took 7–11 s per look in a
+  real call; it has not been measured on the M01 yet. The size is one constant,
+  `HeyCyanAIPhoto.size` (smaller is faster). If the photo doesn't come over, Luna says so and
+  never guesses. For a full-size photo, use the Photo button or **Take and fetch**, which
+  come over the glasses' Wi-Fi.
 - Optional, off by default: the glasses' assistant button starts a Luna call while the app
   is open on screen.
 
@@ -169,8 +179,18 @@ can't use, so it is off by default. With a paid team, set the build setting
 the Swift condition `HERMES_HOTSPOT_JOIN`, which turns on automatic joining. Left at `NO`,
 the app is signed without any entitlements file.
 
-**These glasses accept Bluetooth commands from anyone nearby, with no pairing.** Use them
-for testing, not for anything private.
+**Data from these glasses is untrusted.** They accept Bluetooth connections and commands
+from anyone nearby, with no pairing, so another device could pretend to be your glasses.
+The app therefore fetches photos only from the glasses' own private network (a private
+address inside the Wi-Fi network the iPhone has joined), never follows redirects, and keeps
+only what is a JPEG. Use these glasses for testing, not for anything private.
+
+Known limits:
+
+- Switching to HeyCyan during a Ray-Ban Meta look can run the HeyCyan Wi-Fi flow inside
+  that call.
+- If the app is killed in the middle of a transfer, the glasses' Wi-Fi stays open until the
+  glasses time it out.
 
 ## Demo mode
 

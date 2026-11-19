@@ -6,7 +6,8 @@ import UIKit
 
 /// Takes a photo on HeyCyan glasses and brings it to this iPhone, beta.
 ///
-/// The documented flow (community notes; each stage is traced as `heycyan.transfer stage=…`):
+/// The flow (worked out from community notes, proven on an L802 with an iPhone on 2026-11-16;
+/// each stage is traced as `heycyan.transfer stage=…`):
 /// 1. Bluetooth: hotspot transfer mode (`0x41 02 01 04 02`, as the official iPhone app sends
 ///    it). The reply holds the glasses' own Wi-Fi name and password; about 8 s later the
 ///    glasses report their address (event 0x73/08, 192.168.31.1 on the L802).

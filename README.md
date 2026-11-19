@@ -14,12 +14,13 @@ It sees what you see, answers in your ear, and gated actions wait for your tap.<
 
 <p align="center"><a href="https://x.com/BrukInBetween/status/2120584742378557503"><b>▶ Watch the demo</b></a> · <a href="#install">Install</a> · <a href="#try-it-without-glasses">Try it without glasses</a> · <a href="#how-it-works">How it works</a> · <a href="#safety-model">Safety model</a> · <a href="#faq">FAQ</a> · <a href="ios/README.md">iPhone app</a></p>
 
-> **Status: 0.5.0 (app 1.1).** 0.4.0 was used on real Ray-Ban Meta glasses with an iPhone 13:
+> **Status: 0.5.0 (app 1.2).** 0.4.0 was used on real Ray-Ban Meta glasses with an iPhone 13:
 > photo looks, business card to contact, questions answered by the Hermes agent, interrupting
 > mid-answer and ending calls. 0.5.0 makes the plugin and the app harder to confuse (gateway
 > restarts, declines, talking over a request) and adds a setup code. It was tested on Hermes
-> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. 85 plugin tests and 89 app-core
-> tests; `hermes plugins validate` passes with one warning (it uses Hermes's approval module).
+> 0.22.5 and 0.23.1 with a simulated phone, not yet on glasses. App 1.2 adds HeyCyan glasses
+> (beta, see [How it works](#how-it-works)). 85 plugin tests and 150 app-core tests;
+> `hermes plugins validate` passes with one warning (it uses Hermes's approval module).
 
 <p align="center">
   <img src="docs/screens/home.png" width="270" alt="Home: glasses ready, Talk to Luna">
@@ -104,7 +105,13 @@ Hermes Lens is a **Hermes platform plugin** (this folder) plus an **iPhone app**
 **Your agent, any model.** Hermes Lens does not pick a model for you: answers come from your own
 Hermes agent on whatever provider you run. The parts that talk to Hermes (requests, approval cards,
 the tap rule) do not depend on Gemini or Meta. This release supports one voice service (Gemini Live)
-and one kind of glasses (Ray-Ban Meta); other voice services and devices are planned, not built yet.
+and Ray-Ban Meta glasses; other voice services and devices are planned, not built yet.
+
+**HeyCyan glasses (beta).** The app can also use cheap HeyCyan camera glasses (L802, M01) over
+Bluetooth, without the vendor's app or cloud: connect, battery, a photo brought to the iPhone over
+the glasses' own Wi-Fi, and Luna's look in a call as a small photo over Bluetooth (confirmed on the
+L802, not yet measured on the M01). With HeyCyan glasses the call's voice goes through the iPhone,
+not the glasses. See [HeyCyan glasses (beta)](ios/README.md#heycyan-glasses-beta).
 
 ```mermaid
 sequenceDiagram
