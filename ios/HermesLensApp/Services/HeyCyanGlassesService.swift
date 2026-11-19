@@ -91,6 +91,9 @@ final class HeyCyanGlassesService: NSObject {
     @ObservationIgnored private var buttonListeners: [UUID: AsyncStream<Void>.Continuation] = [:]
     @ObservationIgnored private var audioFrames = 0
     @ObservationIgnored private var buttonFilter = HeyCyanAssistantButtonFilter()
+    /// After a mic start that followed the app's own photo command: traces when no mic stop
+    /// comes within `micStopWait` (the M01 listens by itself after a photo).
+    @ObservationIgnored private var micStopWatch: Task<Void, Never>?
     @ObservationIgnored private var batteryPoll: Task<Void, Never>?
     @ObservationIgnored private var batteryUpdatedAt: Date?
     @ObservationIgnored private var batteryRequestedAt: Date?
@@ -270,6 +273,9 @@ final class HeyCyanGlassesService: NSObject {
     static let aiPhotoShotWait: Duration = .seconds(6)
     static let aiPhotoChunkTimeout: Duration = .seconds(3)
     static let aiPhotoChunkRetries = 3
+    /// How long a mic start after the app's own photo may go without a mic stop before
+    /// `heycyan.mic result=no_stop_event` is traced.
+    static let micStopWait: Duration = .seconds(10)
 
     /// Takes an AI photo (`HeyCyanCommand.takeAIPhoto`) and pulls its JPEG chunk by chunk over
     /// Bluetooth, no Wi-Fi: about 4 s at size 2. Waits up to 6 s for the "shot done" event
@@ -554,6 +560,8 @@ final class HeyCyanGlassesService: NSObject {
         connectDeadline = nil
         batteryPoll?.cancel()
         batteryPoll = nil
+        micStopWatch?.cancel()
+        micStopWatch = nil
         if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         peripheral?.delegate = nil
         peripheral = nil
@@ -607,7 +615,17 @@ final class HeyCyanGlassesService: NSObject {
             let pressed = buttonFilter.isButtonPress(micStartedAt: .now)
             trace("heycyan.event", "mic_started button=\(pressed) listeners=\(buttonListeners.count)")
             if pressed { for listener in buttonListeners.values { listener.yield() } }
+            micStopWatch?.cancel()
+            micStopWatch = pressed ? nil : Task { [weak self] in
+                // Counts only: audio bytes are never kept or logged.
+                try? await Task.sleep(for: Self.micStopWait)
+                guard !Task.isCancelled, let self else { return }
+                self.micStopWatch = nil
+                self.trace("heycyan.mic", "result=no_stop_event audio_frames=\(self.audioFrames)")
+            }
         case .micStopped:
+            micStopWatch?.cancel()
+            micStopWatch = nil
             trace("heycyan.event", "mic_stopped audio_frames=\(audioFrames)")
         case .micAudio:
             audioFrames += 1  // the content is ignored in this version
